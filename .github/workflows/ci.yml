@@ -15,6 +15,7 @@ concurrency:
 
 jobs:
   build:
+    name: Required Windows CI
     uses: ./.github/workflows/build.yml
     with:
       ref: ${{ github.sha }}
