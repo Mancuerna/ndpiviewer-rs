@@ -25,6 +25,7 @@ OutputBaseFilename=NDPI-Viewer-{#AppVersion}-Windows-x64-Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=..\assets\app-icon.ico
 UninstallDisplayIcon={app}\NDPIViewer.exe
 CloseApplications=yes
 RestartApplications=no

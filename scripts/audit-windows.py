@@ -50,6 +50,14 @@ system = {
 }
 unexpected = [dll for dll in imports if dll not in system and not dll.startswith(('api-ms-win-', 'ext-ms-win-'))]
 assert not unexpected, f'Non-system runtime dependencies: {unexpected}'
+
+# Windows Explorer uses the executable's icon resources, independently of egui.
+resource_rva = u32(optional + 112 + 2 * 8)
+assert resource_rva, 'Application resources are missing'
+resource_root = offset(resource_rva)
+resource_count = u16(resource_root + 12) + u16(resource_root + 14)
+resource_types = {u32(resource_root + 16 + index * 8) for index in range(resource_count)}
+assert {3, 14}.issubset(resource_types), 'Application icon and icon group must be embedded'
 debug_rva, debug_size = struct.unpack_from('<II', data, optional + 112 + 6 * 8)
 if debug_rva:
     for pos in range(offset(debug_rva), offset(debug_rva) + debug_size, 28):
@@ -57,4 +65,4 @@ if debug_rva:
 for text in ('example_images', 'JNOC-GC2003', 'Synthetic_fluorescence', 'C:\\Users\\', 'C:/Users/', '--cache-benchmark'):
     for encoding in ('utf-8', 'utf-16le'):
         assert text.lower().encode(encoding) not in data.lower(), f'Development data: {text}'
-print(json.dumps({'file': path.name, 'bytes': len(data), 'architecture': 'x64', 'subsystem': 'GUI', 'imports': sorted(imports), 'codeview': False, 'private_path_scan': 'passed'}, indent=2))
+print(json.dumps({'file': path.name, 'bytes': len(data), 'architecture': 'x64', 'subsystem': 'GUI', 'imports': sorted(imports), 'icon_embedded': True, 'codeview': False, 'private_path_scan': 'passed'}, indent=2))
