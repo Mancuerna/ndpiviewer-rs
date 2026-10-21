@@ -23,6 +23,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      actions: write
     outputs:
       created: ${{ steps.please.outputs.release_created }}
       tag: ${{ steps.please.outputs.tag_name || inputs.tag }}
@@ -35,6 +36,15 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           config-file: .github/release-please-config.json
           manifest-file: .github/release-please-manifest.json
+      # Token-created PRs do not reliably trigger pull_request workflows.
+      # workflow_dispatch runs the same required CI against the release branch.
+      - name: Check the release pull request
+        if: steps.please.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_BRANCH: ${{ fromJSON(steps.please.outputs.pr).headBranchName }}
+        run: gh workflow run ci.yml --ref "$RELEASE_BRANCH"
   build:
     needs: prepare
     if: needs.prepare.outputs.created == 'true' || github.event_name == 'workflow_dispatch'
