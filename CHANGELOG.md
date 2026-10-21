@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1](https://github.com/Mancuerna/ndpiviewer-rs/compare/v0.2.0...v0.2.1) (2026-10-21)
+
+
+### Fixes
+
+* add a custom Windows application icon ([#4](https://github.com/Mancuerna/ndpiviewer-rs/issues/4)) ([e8b7842](https://github.com/Mancuerna/ndpiviewer-rs/commit/e8b7842ac24f3ce5291f51190f2fe8c8be817336))
+
 ## [0.2.0](https://github.com/Mancuerna/ndpiviewer-rs/compare/v0.1.0...v0.2.0) (2026-10-21)
 
 
