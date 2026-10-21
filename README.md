@@ -9,7 +9,7 @@ Built with Rust and egui. Local files, no account, no cloud uploads.
 
 **[Download for Windows x64](https://github.com/Mancuerna/ndpiviewer-rs/releases/latest)** · [What's new](CHANGELOG.md)
 
-![Fluorescence channels in NDPI Viewer](assets/fluorescence.png)
+![Fluorescence channels in NDPI Viewer](assets/fluorescence.jpg)
 
 ## Made for exploring slides
 
@@ -20,7 +20,7 @@ Built with Rust and egui. Local files, no account, no cloud uploads.
 - **Export what matters:** PNG/JPEG views, native-resolution PNG regions and CSV measurements, with optional annotations and scale bars.
 - **Keep memory bounded:** a shared 512 MiB tile cache by default, configurable to 96 or 256 MiB. Total process memory also includes decoding and rendering.
 
-![Side-by-side comparison with independent channel display](assets/comparison.png)
+![Side-by-side comparison with independent channel display](assets/comparison.jpg)
 
 ## Install and use
 
