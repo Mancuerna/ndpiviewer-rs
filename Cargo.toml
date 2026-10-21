@@ -23,6 +23,9 @@ quick-xml = "=0.40.1"
 semver = "1"
 ureq = { version = "=3.4.2", default-features = false, features = ["rustls"] }
 
+[build-dependencies]
+winresource = "=0.1.34"
+
 [profile.release]
 debug = 1
 

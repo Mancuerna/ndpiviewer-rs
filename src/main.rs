@@ -552,6 +552,10 @@ fn main() -> eframe::Result {
         "NDPI Viewer",
         eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
+                .with_icon(
+                    eframe::icon_data::from_png_bytes(include_bytes!("../assets/app-icon.png"))
+                        .expect("Embedded application icon must be a valid PNG"),
+                )
                 .with_inner_size([1200.0, 800.0])
                 .with_min_inner_size([700.0, 600.0]),
             ..Default::default()
