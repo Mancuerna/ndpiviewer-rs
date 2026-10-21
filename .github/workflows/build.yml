@@ -6,9 +6,9 @@ on:
       ref:
         type: string
         required: true
-
-permissions:
-  contents: read
+      release-tag:
+        type: string
+        default: ''
 
 jobs:
   windows:
@@ -35,6 +35,10 @@ jobs:
         with:
           python-version: '3.13'
       - name: Check source and tests
+        env:
+          # Tests do not need optimization; the distribution is built separately.
+          CARGO_PROFILE_RELEASE_OPT_LEVEL: '0'
+          CARGO_PROFILE_RELEASE_DEBUG: '0'
         run: ./scripts/check.ps1
       - name: Install verified Inno Setup compiler
         run: |
@@ -62,6 +66,8 @@ jobs:
           $process = Start-Process "$destination/unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
           if ($process.ExitCode -ne 0 -or (Test-Path "$destination/NDPIViewer.exe")) { throw 'Uninstallation failed.' }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: inputs.release-tag == ''
+        continue-on-error: true
         with:
           name: windows-installer
           path: |
@@ -69,3 +75,24 @@ jobs:
             dist/*.sha256
           if-no-files-found: error
           retention-days: 7
+      - name: Upload installer directly to draft release
+        if: inputs.release-tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ inputs.release-tag }}
+        run: |
+          $metadata = cargo metadata --locked --offline --no-deps --format-version 1 | ConvertFrom-Json
+          $version = $metadata.packages[0].version
+          if ($env:RELEASE_TAG -cne "v$version") { throw 'Tag must match Cargo.toml.' }
+          $installer = Join-Path 'dist' "NDPI-Viewer-$version-Windows-x64-Setup.exe"
+          if (!(Test-Path $installer)) { throw 'Installer missing.' }
+          gh release view $env:RELEASE_TAG *> $null
+          if ($LASTEXITCODE -ne 0) {
+            $section = ([IO.File]::ReadAllText('CHANGELOG.md') -split '(?m)^## ')[1]
+            [IO.File]::WriteAllText('release-notes.md', "## $section")
+            gh release create $env:RELEASE_TAG --verify-tag --draft --title $env:RELEASE_TAG --notes-file release-notes.md
+            if ($LASTEXITCODE -ne 0) { throw 'Draft release creation failed.' }
+          }
+          gh release upload $env:RELEASE_TAG $installer "$installer.sha256" --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Installer upload failed.' }
