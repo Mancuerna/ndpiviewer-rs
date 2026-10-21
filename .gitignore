@@ -22,3 +22,44 @@ rustc-ice-*.txt
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+
+# Local slide data and extracted pixels
+/data/
+/captures/
+*.ndpi
+*.ndpi.part
+*.ndpis
+*.raw
+/example_images/CISD.zip
+/example_images/CISD.zip.part
+/example_images/CISD_samples/
+*.annotations.json
+*.ndpa
+*.ndpa.*.tmp
+*.ndpitrack
+*.ndpitrack.*.tmp
+*.annotations.json.*.tmp
+
+# Per-image display preferences
+*.channels.json
+channel-settings.json
+*.channels.json.*.tmp
+channel-settings.json.*.tmp
+
+# Local development material is never published.
+/example_images/
+/docs/
+/outputs/
+/dist/
+/scripts/compare-cache.ps1
+/scripts/extract-cisd-samples.ps1
+/scripts/measure-viewer.ps1
+/scripts/test-samples.ps1
+/scripts/setup-windows.ps1
+/src/bin/generate-fluorescence-demo.rs
+/tests/fixtures/README.md
+*.log
+*.exe
+*.zip
+.env
+.env.*

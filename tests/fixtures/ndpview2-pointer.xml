@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<annotations>
+	<ndpviewstate id="1">
+		<title/>
+		<details/>
+		<coordformat>nanometers</coordformat>
+		<lens>2,776042</lens>
+		<x>-10333338</x>
+		<y>3151512</y>
+		<z>0</z>
+		<showtitle>0</showtitle>
+		<showhistogram>0</showhistogram>
+		<showlineprofile>0</showlineprofile>
+		<annotation type="circle" displayname="AnnotateCircle" color="#000000">
+			<x>-10823583</x>
+			<y>2642167</y>
+			<radius>1080484</radius>
+			<measuretype>0</measuretype>
+		</annotation>
+	</ndpviewstate>
+	<ndpviewstate id="2">
+		<title/>
+		<details/>
+		<coordformat>nanometers</coordformat>
+		<lens>2,776042</lens>
+		<x>-10333338</x>
+		<y>3151512</y>
+		<z>0</z>
+		<showtitle>0</showtitle>
+		<showhistogram>0</showhistogram>
+		<showlineprofile>0</showlineprofile>
+		<annotation type="pointer" displayname="AnnotatePointer" color="#000000">
+			<x1>-8671600</x1>
+			<y1>2317459</y1>
+			<x2>-8308691</x2>
+			<y2>2642167</y2>
+		</annotation>
+	</ndpviewstate>
+</annotations>

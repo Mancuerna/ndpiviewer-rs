@@ -1,0 +1,66 @@
+name: Build Windows installer
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable action
+        with:
+          toolchain: '1.99.1'
+          components: rustfmt, clippy
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.13'
+      - name: Check source and tests
+        run: ./scripts/check.ps1
+      - name: Install verified Inno Setup compiler
+        run: |
+          $setup = Join-Path $env:RUNNER_TEMP 'innosetup.exe'
+          Invoke-WebRequest 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_3/innosetup-6.7.3.exe' -OutFile $setup
+          $expected = '9C73C3BAE7ED48D44112A0F48E66742C00090BDB5BEF71D9D3C056C66E97B732'
+          if ((Get-FileHash $setup -Algorithm SHA256).Hash -ne $expected) { throw 'Inno Setup checksum mismatch.' }
+          $compilerDir = Join-Path $env:RUNNER_TEMP 'inno'
+          $process = Start-Process $setup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', '/PORTABLE=1', ('/DIR="' + $compilerDir + '"')) -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw 'Inno Setup installation failed.' }
+          "INNO_COMPILER=$compilerDir\ISCC.exe" >> $env:GITHUB_ENV
+      - name: Package and audit
+        run: ./scripts/build-installer.ps1 -Compiler $env:INNO_COMPILER -OutputDirectory dist
+      - name: Smoke test installation and removal
+        run: |
+          $setup = Get-ChildItem dist/*-Setup.exe
+          $destination = Join-Path $env:RUNNER_TEMP 'viewer-smoke'
+          $process = Start-Process $setup.FullName -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/NOICONS', ('/DIR="' + $destination + '"')) -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw 'Installation failed.' }
+          $actual = @(Get-ChildItem $destination -File | Select-Object -ExpandProperty Name | Sort-Object)
+          $expected = @('LICENSE.txt', 'NDPIViewer.exe', 'ThirdPartyNotices.txt', 'unins000.dat', 'unins000.exe') | Sort-Object
+          if (Compare-Object $expected $actual) { throw 'Unexpected installed payload.' }
+          python scripts/audit-windows.py "$destination/NDPIViewer.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'Installed executable audit failed.' }
+          $process = Start-Process "$destination/unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
+          if ($process.ExitCode -ne 0 -or (Test-Path "$destination/NDPIViewer.exe")) { throw 'Uninstallation failed.' }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-installer
+          path: |
+            dist/*-Setup.exe
+            dist/*.sha256
+          if-no-files-found: error
+          retention-days: 7

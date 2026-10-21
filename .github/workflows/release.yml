@@ -1,0 +1,86 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to publish or retry (for example v0.1.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: releases
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      created: ${{ steps.please.outputs.release_created }}
+      tag: ${{ steps.please.outputs.tag_name || inputs.tag }}
+      ref: ${{ steps.please.outputs.sha || inputs.tag }}
+    steps:
+      - uses: googleapis/release-please-action@8b8fd2cc23b2e18957157a9d923d75aa0c6f6ad5 # v4
+        id: please
+        if: github.event_name == 'push'
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: .github/release-please-config.json
+          manifest-file: .github/release-please-manifest.json
+  build:
+    needs: prepare
+    if: needs.prepare.outputs.created == 'true' || github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/build.yml
+    with:
+      ref: ${{ needs.prepare.outputs.ref }}
+  publish:
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.prepare.outputs.ref }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: windows-installer
+          path: dist
+      - name: Verify release version and prepare first-release notes
+        run: |
+          python3 - <<'PY'
+          import os, pathlib, re, tomllib
+          tag = os.environ['RELEASE_TAG']
+          version = tomllib.loads(pathlib.Path('Cargo.toml').read_text())['package']['version']
+          if not re.fullmatch(r'v\d+\.\d+\.\d+(?:-[\w.-]+)?', tag) or tag != 'v' + version:
+              raise SystemExit('Tag must match Cargo.toml version.')
+          files = list(pathlib.Path('dist').glob('*-Setup.exe'))
+          if len(files) != 1 or files[0].name != f'NDPI-Viewer-{version}-Windows-x64-Setup.exe':
+              raise SystemExit('Unexpected installer version.')
+          import hashlib
+          checksum = files[0].with_name(files[0].name + '.sha256').read_text().split()[0]
+          if hashlib.sha256(files[0].read_bytes()).hexdigest().lower() != checksum.lower():
+              raise SystemExit('Installer checksum mismatch.')
+          changelog = pathlib.Path('CHANGELOG.md').read_text()
+          sections = re.split(r'^## ', changelog, flags=re.M)
+          pathlib.Path('release-notes.md').write_text('## ' + sections[1])
+          PY
+      - name: Publish only after all build checks pass
+        run: |
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --verify-tag --draft --title "$RELEASE_TAG" --notes-file release-notes.md
+          fi
+          gh release upload "$RELEASE_TAG" dist/* --clobber
+          gh release edit "$RELEASE_TAG" --draft=false --latest
