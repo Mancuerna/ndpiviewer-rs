@@ -55,7 +55,8 @@ with a changelog after checks pass.
 ## License and credits
 
 Code: **[GPL-3.0-or-later](LICENSE)**. Uses [bioformats-rs](https://github.com/henriksson-lab/bioformats-rs)
-(GPL-2.0-or-later) and [egui](https://github.com/emilk/egui). Dependency notices ship with the installer.
+(GPL-2.0-or-later) and [egui](https://github.com/emilk/egui). Dependency notices ship with the installer;
+each release also includes a source archive with the locked dependencies.
 
 Screenshots show Manuel Stritt's [public fluorescence sample](https://downloads.openmicroscopy.org/images/Hamamatsu-NDPI/manuel/),
 licensed [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), with display colors and contrast adjusted in the viewer.

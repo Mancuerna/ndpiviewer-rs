@@ -77,6 +77,22 @@ jobs:
           sections = re.split(r'^## ', changelog, flags=re.M)
           pathlib.Path('release-notes.md').write_text('## ' + sections[1])
           PY
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable action
+        with:
+          toolchain: '1.99.1'
+      - name: Bundle corresponding source and locked dependencies
+        run: |
+          mkdir -p source/.cargo
+          git archive HEAD | tar -x -C source
+          cargo vendor --locked --versioned-dirs source/vendor > source/.cargo/config.toml
+          python3 - <<'PY'
+          import pathlib, re
+          config = pathlib.Path('source/.cargo/config.toml')
+          config.write_text(re.sub(r'^directory = .*$', 'directory = "vendor"', config.read_text(), flags=re.M))
+          PY
+          (cd source && cargo metadata --locked --offline --format-version 1 > /dev/null)
+          tar -czf "dist/NDPI-Viewer-${RELEASE_TAG}-Source.tar.gz" -C source .
+          (cd dist && sha256sum "NDPI-Viewer-${RELEASE_TAG}-Source.tar.gz" > "NDPI-Viewer-${RELEASE_TAG}-Source.tar.gz.sha256")
       - name: Publish only after all build checks pass
         run: |
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
