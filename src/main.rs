@@ -46,6 +46,7 @@ mod source;
 mod synthetic;
 mod tiles;
 mod tracking;
+mod updates;
 
 const MAX_REGION: u32 = 1536;
 const TILE_SIZE: u32 = 512;

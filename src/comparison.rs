@@ -38,6 +38,7 @@ fn linked_position(before: Position, after: Position, target: Position) -> Posit
 }
 
 pub(super) struct Comparison {
+    updates: updates::Updates,
     library: crate::library::Library,
     tabs: [Vec<PathBuf>; 2],
     viewers: [Viewer; 2],
@@ -53,6 +54,7 @@ pub(super) struct Comparison {
 impl Comparison {
     pub(super) fn new(left: Viewer, right: Viewer) -> Self {
         Self {
+            updates: Default::default(),
             library: Default::default(),
             tabs: Default::default(),
             total_budget: left.cache_budget,
@@ -162,6 +164,7 @@ impl eframe::App for Comparison {
 
         let benchmark = self.viewers[0].benchmark.is_some();
         if !benchmark {
+            self.updates.show(ctx);
             let dropped = ctx.input(|i| i.raw.dropped_files.clone());
             if !dropped.is_empty() {
                 if dropped.len() == 1 {

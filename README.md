@@ -33,6 +33,8 @@ an NDPIS set together. Scroll to zoom, drag to pan and use **Focus Z** to change
 Annotations and per-image preferences are saved beside your images when writable.
 **Help > Open error logs folder** opens local diagnostics; logs omit image names,
 paths and annotation text and are never uploaded.
+At startup, the app checks GitHub for a newer stable release and shows a dismissible
+download link when available. Updates are installed manually; no slide data is sent.
 
 Experimental software; not clinically validated. Physical measurements require
 valid file calibration. Tracking uses our own sidecar format. No sample slides
