@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/Mancuerna/ndpiviewer-rs/compare/v0.1.0...v0.2.0) (2026-10-21)
+
+
+### Features
+
+* notify about new releases at startup ([fb4424a](https://github.com/Mancuerna/ndpiviewer-rs/commit/fb4424ad89e8b70b4558d3f4f0b08d8f92266cb1))
+
 ## 0.1.0 (2026-10-21)
 
 First Windows release.
