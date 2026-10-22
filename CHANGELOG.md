@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/Mancuerna/ndpiviewer-rs/compare/v0.3.0...v0.4.0) (2026-10-22)
+
+
+### Features
+
+* add left-hand shortcuts and microscope magnification presets ([#8](https://github.com/Mancuerna/ndpiviewer-rs/issues/8)) ([4a3a916](https://github.com/Mancuerna/ndpiviewer-rs/commit/4a3a91682280cd8ce65d7ed16ee4b3025d1e65c9))
+
 ## [0.3.0](https://github.com/Mancuerna/ndpiviewer-rs/compare/v0.2.1...v0.3.0) (2026-10-22)
 
 
