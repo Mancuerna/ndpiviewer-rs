@@ -124,11 +124,15 @@ impl Viewer {
                     "Arrow",
                     "Drag from the point of interest toward the arrow tail.",
                 ),
-                (Tool::Rectangle, "Box", "Drag across a rectangular region."),
+                (
+                    Tool::Rectangle,
+                    "Box",
+                    "Drag a rectangle, or enable Exact size to place identical fields.",
+                ),
                 (
                     Tool::Circle,
                     "Circle",
-                    "Drag from the center to set the radius.",
+                    "Drag from the center, or enable Exact size to place identical fields.",
                 ),
                 (
                     Tool::Polygon,
@@ -151,6 +155,7 @@ impl Viewer {
                 self.features.inspector = Tab::Annotations;
             }
         }
+        self.exact_shape_controls(ui, &slide);
         if let Some(error) = &self.features.error {
             ui.colored_label(egui::Color32::LIGHT_RED, error);
         } else if !self.features.writable {
