@@ -41,8 +41,8 @@ impl Viewer {
 
     pub(super) fn orientation_menu(&mut self, ui: &mut egui::Ui) {
         ui.add_enabled_ui(self.slide.is_some(), |ui| {
-            if ui.button(if self.features.overview_return.is_some() { "Return to detail" } else { "Overview" })
-                .on_hover_text("Temporary whole-slide view; press W again to restore the previous position and zoom.")
+            if ui.button(if self.features.overview_return.is_some() { "Return to detail [Tab]" } else { "Overview [Tab]" })
+                .on_hover_text("Temporary whole-slide view; press Tab again to restore the previous position and zoom.")
                 .clicked()
             {
                 self.toggle_overview();

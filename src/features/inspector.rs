@@ -44,8 +44,8 @@ impl Viewer {
         let mut plane = self.plane + 1;
         ui.horizontal(|ui| {
             if ui
-                .add_enabled(plane > 1, egui::Button::new("−"))
-                .on_hover_text("Previous focus plane (Page Up)")
+                .add_enabled(plane > 1, egui::Button::new("− [Z]"))
+                .on_hover_text("Previous focus plane (Z / Page Up)")
                 .clicked()
             {
                 plane -= 1;
@@ -55,8 +55,8 @@ impl Viewer {
                 egui::Slider::new(&mut plane, 1..=slide.planes).show_value(false),
             );
             if ui
-                .add_enabled(plane < slide.planes, egui::Button::new("+"))
-                .on_hover_text("Next focus plane (Page Down)")
+                .add_enabled(plane < slide.planes, egui::Button::new("+ [X]"))
+                .on_hover_text("Next focus plane (X / Page Down)")
                 .clicked()
             {
                 plane += 1;
@@ -111,37 +111,37 @@ impl Viewer {
             for (tool, label, hint) in [
                 (
                     Tool::Pan,
-                    "Pan",
+                    "Pan [Q]",
                     "Drag to move. Click a shape to select it. Escape returns to this tool.",
                 ),
                 (
                     Tool::Line,
-                    "Length",
+                    "Length [W]",
                     "Drag between two points to measure length.",
                 ),
                 (
                     Tool::Pointer,
-                    "Arrow",
+                    "Arrow [A]",
                     "Drag from the point of interest toward the arrow tail.",
                 ),
                 (
                     Tool::Rectangle,
-                    "Box",
+                    "Box [E]",
                     "Drag a rectangle, or enable Exact size to place identical fields.",
                 ),
                 (
                     Tool::Circle,
-                    "Circle",
+                    "Circle [S]",
                     "Drag from the center, or enable Exact size to place identical fields.",
                 ),
                 (
                     Tool::Polygon,
-                    "Polygon",
+                    "Polygon [C]",
                     "Click vertices; double-click or Enter to finish.",
                 ),
                 (
                     Tool::Freehand,
-                    "Freehand",
+                    "Freehand [D]",
                     "Draw an outline; release to close it.",
                 ),
             ] {

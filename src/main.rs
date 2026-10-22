@@ -433,7 +433,14 @@ impl Viewer {
                 self.changed();
             }
         }
-        let picked = if response.double_clicked() && self.features.tool == features::Tool::Pan {
+        let temporary_pan = self.temporary_pan(&ctx);
+        if temporary_pan {
+            self.features.cancel_gesture();
+        }
+        let picked = if !temporary_pan
+            && response.double_clicked()
+            && self.features.tool == features::Tool::Pan
+        {
             response
                 .interact_pointer_pos()
                 .and_then(|p| self.pick_annotation(p, rect))
@@ -443,8 +450,8 @@ impl Viewer {
         if let Some(index) = picked {
             self.visit_annotation(index, true);
         }
-        let selecting_region = self.select_export_region(ui, rect, &response);
-        let editing_geometry = if selecting_region {
+        let selecting_region = !temporary_pan && self.select_export_region(ui, rect, &response);
+        let editing_geometry = if selecting_region || temporary_pan {
             false
         } else {
             self.edit_geometry(ui, rect, &response)
@@ -475,7 +482,7 @@ impl Viewer {
                 self.changed();
             }
             if response.dragged_by(egui::PointerButton::Primary)
-                && self.features.tool == features::Tool::Pan
+                && (self.features.tool == features::Tool::Pan || temporary_pan)
                 && !editing_geometry
                 && !selecting_region
             {
