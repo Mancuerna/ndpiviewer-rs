@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/Mancuerna/ndpiviewer-rs/compare/v0.2.1...v0.3.0) (2026-10-22)
+
+
+### Features
+
+* place circles and rectangles with exact measurements ([#6](https://github.com/Mancuerna/ndpiviewer-rs/issues/6)) ([bd88946](https://github.com/Mancuerna/ndpiviewer-rs/commit/bd889463b797bb753d8e63f387c533779dc90074))
+
 ## [0.2.1](https://github.com/Mancuerna/ndpiviewer-rs/compare/v0.2.0...v0.2.1) (2026-10-21)
 
 
