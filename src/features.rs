@@ -9,6 +9,7 @@ mod polygon_input;
 mod region_panel;
 pub(crate) mod render;
 mod report;
+mod shortcuts;
 use super::*;
 #[cfg(test)]
 use persistence::{annotation_path, validate};
@@ -301,115 +302,6 @@ impl Viewer {
             .add(egui::Shape::mesh(mesh));
     }
 
-    pub(super) fn handle_shortcuts(&mut self, ctx: &egui::Context) {
-        if self.benchmark.is_some() || ctx.wants_keyboard_input() || self.slide.is_none() {
-            return;
-        }
-        let undo = ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Z));
-        let redo = ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Y));
-        if undo || redo {
-            if undo {
-                self.features.undo_edit();
-            } else {
-                self.features.redo_edit();
-            }
-            if let Some(slide) = &self.slide {
-                self.features.save(slide);
-            }
-            return;
-        }
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Delete)) {
-            if let Some(index) = self.features.selected {
-                self.features.remove_annotation(index);
-                if let Some(slide) = &self.slide {
-                    self.features.save(slide);
-                }
-            }
-            return;
-        }
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::ALT, egui::Key::M)) {
-            self.toggle_mirror(0);
-            return;
-        }
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::ALT, egui::Key::F)) {
-            self.toggle_mirror(1);
-            return;
-        }
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::W)) {
-            self.toggle_overview();
-            return;
-        }
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::B)) {
-            self.features.show_scale = !self.features.show_scale;
-            return;
-        }
-        // egui-winit translates Ctrl+C (including Ctrl+Shift+C) to Copy.
-        // Text inputs are excluded by the guard above.
-        if !self.features.info_open
-            && ctx.input(|i| {
-                i.events
-                    .iter()
-                    .any(|event| matches!(event, egui::Event::Copy))
-            })
-        {
-            self.request_capture(ctx, CaptureTarget::Clipboard);
-            return;
-        }
-        // Match the modifiers attached to the key event, even if Alt was
-        // released before this frame. Consume arrows before the pan bindings.
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::ALT, egui::Key::ArrowLeft)) {
-            self.navigate_history(false);
-            return;
-        }
-        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::ALT, egui::Key::ArrowRight)) {
-            self.navigate_history(true);
-            return;
-        }
-        ctx.input(|i| {
-            if i.key_pressed(egui::Key::F) {
-                self.fit = true;
-            }
-            if i.key_pressed(egui::Key::R) {
-                self.features.cancel_gesture();
-                self.features.rotation = (self.features.rotation + 1) % 4;
-                self.changed();
-            }
-            if i.key_pressed(egui::Key::Escape) {
-                self.features.tool = Tool::Pan;
-                self.features.cancel_gesture();
-            }
-            if i.key_pressed(egui::Key::Num1) {
-                self.zoom = 1.0;
-                self.changed();
-            }
-            if i.key_pressed(egui::Key::PageUp) {
-                self.features.cancel_gesture();
-                self.plane = self.plane.saturating_sub(1);
-                self.changed();
-            }
-            if i.key_pressed(egui::Key::PageDown) {
-                self.features.cancel_gesture();
-                self.plane = (self.plane + 1).min(self.slide.as_ref().unwrap().planes - 1);
-                self.changed();
-            }
-            let mut delta = egui::Vec2::ZERO;
-            for (key, step) in [
-                (egui::Key::ArrowLeft, egui::vec2(-100.0, 0.0)),
-                (egui::Key::ArrowRight, egui::vec2(100.0, 0.0)),
-                (egui::Key::ArrowUp, egui::vec2(0.0, -100.0)),
-                (egui::Key::ArrowDown, egui::vec2(0.0, 100.0)),
-            ] {
-                if i.key_pressed(key) {
-                    delta += step;
-                }
-            }
-            if delta != egui::Vec2::ZERO {
-                self.center += self.inverse_transform(delta) / self.zoom;
-                self.changed();
-            }
-        });
-    }
-
     fn annotation_panel(&mut self, ui: &mut egui::Ui, slide: &Slide) {
         ui.heading("Annotations");
         ui.horizontal_wrapped(|ui| {
@@ -647,8 +539,9 @@ impl Viewer {
         ui.small("Exports include visible annotations and scale at window resolution. PNG is lossless; JPEG uses quality 95.");
         ui.checkbox(&mut self.features.show_scale, "Show scale bar (B)");
         ui.collapsing("Keyboard & mouse",|ui|{
-            ui.label("W: overview / return · Alt+M / Alt+F: mirror / flip\nF11: full screen · Escape: leave full screen");
-            ui.label("F: fit · R: rotate · 1: 100%\nArrows: pan · Page Up/Down: Z\nRight-drag: zoom to area\nEscape: pan tool");
+            ui.label("Q: pan · W: length · E: box · A: arrow · S: circle · D: freehand · C: polygon");
+            ui.label("Tab: overview / return · Alt+M / Alt+F: mirror / flip\nF11: full screen · Escape: leave full screen");
+            ui.label("F: fit · R: rotate · 1–5: 2× / 4× / 10× / 20× / 40×\nArrows: pan · Z / X or Page Up/Down: focus Z\nRight-drag: zoom to area\nEscape: pan tool · Hold Space: temporary pan");
         });
     }
 
@@ -704,9 +597,13 @@ impl Viewer {
         };
         let secondary = egui::PointerButton::Secondary;
         let primary = egui::PointerButton::Primary;
-        self.polygon_input(ui, rect, response);
-        self.freehand_input(ui, rect, response);
-        let exact = self.features.exact_shape.enabled
+        let temporary_pan = self.temporary_pan(ui.ctx());
+        if !temporary_pan {
+            self.polygon_input(ui, rect, response);
+            self.freehand_input(ui, rect, response);
+        }
+        let exact = !temporary_pan
+            && self.features.exact_shape.enabled
             && matches!(self.features.tool, Tool::Circle | Tool::Rectangle);
         if exact {
             self.exact_shape_input(ui, rect, response, &slide);
@@ -715,7 +612,8 @@ impl Viewer {
             self.features.tool,
             Tool::Line | Tool::Pointer | Tool::Rectangle | Tool::Circle
         ) && self.shown_plane == Some(self.plane)
-            && !exact;
+            && !exact
+            && !temporary_pan;
         if self.shown_plane != Some(self.plane) {
             self.features.start = None;
         }

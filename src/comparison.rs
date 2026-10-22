@@ -162,6 +162,7 @@ impl eframe::App for Comparison {
             }
         }
 
+        self.viewers[self.active].handle_overview_shortcut(ctx);
         let benchmark = self.viewers[0].benchmark.is_some();
         if !benchmark {
             self.updates.show(ctx);

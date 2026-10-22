@@ -31,6 +31,23 @@ pub(super) fn focus_scroll(events: &[egui::Event]) -> i32 {
 }
 
 impl Viewer {
+    pub(super) fn set_magnification(&mut self, requested: f64) {
+        let zoom = self
+            .slide
+            .as_ref()
+            .and_then(|s| s.ndpa.as_ref())
+            .and_then(|g| pixel_zoom(g.lens, requested));
+        if let Some(zoom) = zoom {
+            self.features.cancel_gesture();
+            self.zoom = zoom;
+            self.fit = false;
+            self.changed();
+        } else {
+            self.status =
+                "Magnification unavailable: missing or unsupported scan objective metadata.".into();
+        }
+    }
+
     pub(super) fn magnification_menu(&mut self, ui: &mut egui::Ui) {
         let source = self
             .slide
@@ -46,12 +63,18 @@ impl Viewer {
                 let source = source.unwrap_or(0.0);
                 ui.small(format!("Source scan: {source}×"));
                 ui.small("Scan-relative magnification; physical scale is shown by the µm bar.");
-                for requested in [1.25, 2.5, 5.0, 10.0, 20.0, 40.0, 80.0, 160.0] {
+                for requested in [1.25, 2.0, 2.5, 4.0, 5.0, 10.0, 20.0, 40.0, 80.0, 160.0] {
                     if let Some(zoom) = pixel_zoom(source, requested) {
                         if ui
                             .selectable_label(
                                 (self.zoom - zoom).abs() < 0.0001,
-                                format!("{requested}×"),
+                                [2.0, 4.0, 10.0, 20.0, 40.0]
+                                    .iter()
+                                    .position(|v| *v == requested)
+                                    .map_or_else(
+                                        || format!("{requested}×"),
+                                        |index| format!("{requested}×  [{}]", index + 1),
+                                    ),
                             )
                             .clicked()
                         {
