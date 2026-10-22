@@ -1,4 +1,5 @@
 mod capture;
+mod exact_shape;
 mod freehand;
 mod geometry_edit;
 mod inspector;
@@ -23,6 +24,7 @@ enum CaptureTarget {
 }
 
 pub(super) struct Features {
+    exact_shape: exact_shape::Settings,
     edit_shape: bool,
     geometry_gesture: Option<geometry_edit::Gesture>,
     inspector: inspector::Tab,
@@ -57,6 +59,7 @@ pub(super) struct Features {
 impl Default for Features {
     fn default() -> Self {
         Self {
+            exact_shape: Default::default(),
             edit_shape: false,
             geometry_gesture: None,
             inspector: inspector::Tab::default(),
@@ -419,7 +422,7 @@ impl Viewer {
         if self.features.tool == Tool::Freehand {
             ui.small("Drag around a region; release to close it. The outline is simplified within 1.5 screen pixels. Escape cancels.");
         }
-        if self.features.tool == Tool::Circle {
+        if self.features.tool == Tool::Circle && !self.features.exact_shape.enabled {
             ui.small("Drag from the center to set the radius. Physical circles account for X/Y calibration.");
         }
         if self.features.tool == Tool::Polygon {
@@ -703,10 +706,16 @@ impl Viewer {
         let primary = egui::PointerButton::Primary;
         self.polygon_input(ui, rect, response);
         self.freehand_input(ui, rect, response);
+        let exact = self.features.exact_shape.enabled
+            && matches!(self.features.tool, Tool::Circle | Tool::Rectangle);
+        if exact {
+            self.exact_shape_input(ui, rect, response, &slide);
+        }
         let drawing = matches!(
             self.features.tool,
             Tool::Line | Tool::Pointer | Tool::Rectangle | Tool::Circle
-        ) && self.shown_plane == Some(self.plane);
+        ) && self.shown_plane == Some(self.plane)
+            && !exact;
         if self.shown_plane != Some(self.plane) {
             self.features.start = None;
         }
