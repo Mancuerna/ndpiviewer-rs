@@ -343,7 +343,7 @@ impl Viewer {
             }
         }
         if let Some(c) = slide.calibration {
-            ui.small("Measurements in µm and µm²")
+            ui.small("Lengths in µm / mm · Areas in µm²")
                 .on_hover_text(format!("Pixel spacing: X {:.6}, Y {:.6} µm/px", c.x, c.y));
         } else {
             ui.colored_label(
