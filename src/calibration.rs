@@ -59,6 +59,15 @@ pub(super) struct ScaleBar {
     pub label: String,
 }
 
+/// Format a calibrated length without changing the underlying micrometre value.
+pub(super) fn length_label(microns: f64) -> String {
+    if microns.abs() >= 1000.0 {
+        format!("{:.3} mm", microns / 1000.0)
+    } else {
+        format!("{microns:.2} µm")
+    }
+}
+
 /// Choose a readable 1/2/5 length in viewport logical pixels, not device pixels.
 /// A horizontal screen bar follows source Y after a quarter-turn rotation.
 pub(super) fn scale_bar(
@@ -88,11 +97,24 @@ pub(super) fn scale_bar(
         } else {
             1.0
         };
-    let decimals = (-exponent).clamp(0.0, 12.0) as usize;
-    let unit = if calibration.is_some() { "µm" } else { "px" };
+    let millimeters = calibration.is_some() && length >= 1000.0;
+    let display_length = if millimeters { length / 1000.0 } else { length };
+    let display_exponent = if millimeters {
+        exponent - 3.0
+    } else {
+        exponent
+    };
+    let decimals = (-display_exponent).clamp(0.0, 12.0) as usize;
+    let unit = if millimeters {
+        "mm"
+    } else if calibration.is_some() {
+        "µm"
+    } else {
+        "px"
+    };
     Some(ScaleBar {
         width: (length / units_per_point) as f32,
-        label: format!("{length:.decimals$} {unit}"),
+        label: format!("{display_length:.decimals$} {unit}"),
     })
 }
 
@@ -106,9 +128,16 @@ pub(super) fn measurement(
     if let Some(c) = calibration {
         let (x, y) = (dx * c.x, dy * c.y);
         if line {
-            format!("{:.2} µm", x.hypot(y))
+            length_label(x.hypot(y))
         } else {
-            format!("{x:.2} × {y:.2} µm · {:.2} µm²", x * y)
+            let dimensions = if x < 1000.0 && y < 1000.0 {
+                format!("{x:.2} × {y:.2} µm")
+            } else if x >= 1000.0 && y >= 1000.0 {
+                format!("{:.3} × {:.3} mm", x / 1000.0, y / 1000.0)
+            } else {
+                format!("{} × {}", length_label(x), length_label(y))
+            };
+            format!("{dimensions} · {:.2} µm²", x * y)
         }
     } else if line {
         format!("{:.1} px", dx.hypot(dy))
@@ -121,6 +150,36 @@ pub(super) fn measurement(
 mod tests {
     use super::*;
     #[test]
+    fn length_units_switch_at_one_thousand_microns_only() {
+        let c = Some(Calibration { x: 0.5, y: 1.0 });
+        for (pixels, expected) in [
+            (1999.0, "999.50 µm"),
+            (2000.0, "1.000 mm"),
+            (2500.0, "1.250 mm"),
+        ] {
+            assert_eq!(measurement(egui::vec2(pixels, 0.0), true, c), expected);
+        }
+        assert_eq!(
+            measurement(egui::vec2(2500.0, 0.0), true, None),
+            "2500.0 px"
+        );
+        assert_eq!(
+            measurement(egui::vec2(2500.0, 500.0), false, c),
+            "1.250 mm × 500.00 µm · 625000.00 µm²"
+        );
+        assert_eq!(
+            measurement(egui::vec2(2000.0, 1000.0), false, c),
+            "1.000 × 1.000 mm · 1000000.00 µm²"
+        );
+        let unit = Some(Calibration { x: 1.0, y: 1.0 });
+        for (width, expected) in [(999.0, "500 µm"), (1000.0, "1 mm"), (2000.0, "2 mm")] {
+            let bar = scale_bar(unit, 1.0, 0, width).unwrap();
+            assert_eq!(bar.label, expected);
+            assert_eq!(bar.width, if width < 1000.0 { 500.0 } else { width });
+        }
+        assert_eq!(scale_bar(None, 1.0, 0, 2000.0).unwrap().label, "2000 px");
+    }
+    #[test]
     fn scale_bar_tracks_zoom_rotation_and_missing_calibration() {
         let c = Some(Calibration { x: 0.25, y: 0.5 });
         for (zoom, rotation, label, width) in [
@@ -129,7 +188,7 @@ mod tests {
             (1.0, 1, "50 µm", 100.0),
             (1.0, 2, "20 µm", 80.0),
             (1.0, 3, "50 µm", 100.0),
-            (0.01, 0, "2000 µm", 80.0),
+            (0.01, 0, "2 mm", 80.0),
         ] {
             let bar = scale_bar(c, zoom, rotation, 160.0).unwrap();
             assert_eq!(bar.label, label);
