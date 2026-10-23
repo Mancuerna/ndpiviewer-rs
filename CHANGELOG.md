@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/Mancuerna/ndpiviewer-rs/compare/v0.4.0...v0.4.1) (2026-10-23)
+
+
+### Fixes
+
+* display lengths in millimeters from 1000 micrometers ([#10](https://github.com/Mancuerna/ndpiviewer-rs/issues/10)) ([f1e6259](https://github.com/Mancuerna/ndpiviewer-rs/commit/f1e6259b2237398e4002d25824edef2d6a9fcf47))
+
 ## [0.4.0](https://github.com/Mancuerna/ndpiviewer-rs/compare/v0.3.0...v0.4.0) (2026-10-22)
 
 
