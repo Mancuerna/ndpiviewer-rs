@@ -18,6 +18,7 @@ use reader::inspect;
 use slide::{Level, Region, Slide};
 use worker::{Reply, Request};
 mod reader;
+mod resample;
 mod slide;
 mod worker;
 use eframe::egui;
@@ -55,8 +56,8 @@ const MAX_VISIBLE_TILES: usize = 40;
 const DEFAULT_CACHE_BUDGET: usize = 512 * 1024 * 1024;
 
 fn same_region(a: &Region, b: &Region) -> bool {
-    (a.series, a.plane, a.x, a.y, a.w, a.h, a.preview)
-        == (b.series, b.plane, b.x, b.y, b.w, b.h, b.preview)
+    (a.series, a.plane, a.x, a.y, a.w, a.h, a.preview, a.sampling)
+        == (b.series, b.plane, b.x, b.y, b.w, b.h, b.preview, b.sampling)
 }
 
 struct CachedRegion {
@@ -65,6 +66,7 @@ struct CachedRegion {
 }
 
 struct Viewer {
+    preferences: settings::Preferences,
     region_export: region_export::Export,
     associated: associated::Associated,
     pending_close: bool,
@@ -89,6 +91,7 @@ struct Viewer {
     cache: Vec<CachedRegion>,
     failed: Vec<Region>,
     status: String,
+    pixel_ratio: f32,
     viewport_size: egui::Vec2,
     renderer: String,
 }
@@ -113,6 +116,9 @@ impl Viewer {
         cc.egui_ctx.set_style(style);
         let (tx, rx) = worker::spawn(&cc.egui_ctx);
         Self {
+            preferences: settings::Preferences::path()
+                .map(|p| settings::Preferences::load(&p))
+                .unwrap_or_default(),
             region_export: Default::default(),
             associated: Default::default(),
             pending_close: false,
@@ -137,6 +143,7 @@ impl Viewer {
             cache: Vec::new(),
             failed: Vec::new(),
             status: "Open an NDPI slide to begin.".into(),
+            pixel_ratio: 1.0,
             viewport_size: egui::Vec2::ZERO,
             // eframe makes the OpenGL context current during app creation.
             renderer: cc
@@ -246,6 +253,7 @@ impl Viewer {
         let preview = level.width > MAX_REGION || level.height > MAX_REGION;
         let factor = (1024.0 / level.width.max(level.height) as f64).min(1.0);
         Some(Region {
+            sampling: 1,
             preview,
             series: level.series,
             interleaved: level.interleaved,
@@ -300,6 +308,16 @@ impl Viewer {
                 {
                     self.fit = true;
                 }
+                ui.menu_button("Navigation…", |ui| {
+                    ui.label("Arrow-key movement (screen pixels per press)");
+                    ui.add(
+                        egui::Slider::new(&mut self.preferences.arrow_step, 10.0..=1000.0)
+                            .text("Step"),
+                    );
+                    ui.small(
+                        "Saved for all slides. Movement follows the current view orientation.",
+                    );
+                });
                 let previous_budget = *total_budget;
                 egui::ComboBox::from_id_salt("cache-budget")
                     .selected_text(format!("Cache: {} MiB", *total_budget / 1048576))
@@ -396,7 +414,7 @@ impl Viewer {
                     ui.label("Scroll: zoom · Drag: pan · F: fit · Escape: Pan / select");
                     ui.label("Page Up / Down or Ctrl+wheel: focus Z");
                     ui.label("Ctrl+Z / Ctrl+Y: undo / redo annotations");
-                    ui.label("W: overview / return · F11: full screen");
+                    ui.label("Tab: overview / return · F11: full screen");
                     ui.label("Right-drag: zoom to region · B: scale bar");
                 });
             });
@@ -429,6 +447,7 @@ impl Viewer {
         );
         if rect.size() != self.viewport_size {
             self.viewport_size = rect.size();
+            self.pixel_ratio = ui.ctx().pixels_per_point();
             if self.slide.is_some() {
                 self.changed();
             }
@@ -600,6 +619,7 @@ mod tests {
         let (reply_tx, rx) = mpsc::channel();
         (
             Viewer {
+                preferences: settings::Preferences::default(),
                 region_export: Default::default(),
                 associated: Default::default(),
                 pending_close: false,
@@ -645,6 +665,7 @@ mod tests {
                 cache: vec![],
                 failed: vec![],
                 status: String::new(),
+                pixel_ratio: 1.0,
                 viewport_size: egui::Vec2::ZERO,
                 renderer: "Test".into(),
             },
@@ -709,6 +730,7 @@ mod tests {
                 for x in 0..300 {
                     viewer.cache.push(CachedRegion {
                         region: Region {
+                            sampling: 1,
                             preview: false,
                             series,
                             interleaved: true,
@@ -803,6 +825,7 @@ mod tests {
                 .collect(),
         };
         let mut viewer = Viewer {
+            preferences: settings::Preferences::default(),
             region_export: Default::default(),
             associated: Default::default(),
             pending_close: false,
@@ -827,6 +850,7 @@ mod tests {
             cache: Vec::new(),
             failed: Vec::new(),
             status: String::new(),
+            pixel_ratio: 1.0,
             viewport_size: egui::Vec2::ZERO,
             renderer: "Test".into(),
         };
@@ -913,6 +937,7 @@ mod tests {
         let level = slide.levels.last().unwrap();
         assert!(level.width > MAX_REGION && level.height > MAX_REGION);
         let region = Region {
+            sampling: 1,
             preview: true,
             series: level.series,
             interleaved: level.interleaved,
@@ -929,6 +954,7 @@ mod tests {
         for oy in [0, 143, 144, 287, 288, 519] {
             for ox in [0, 143, 144, 287, 288, 1023] {
                 let pixel = Region {
+                    sampling: 1,
                     preview: false,
                     x: ox * level.width / region.w,
                     y: oy * level.height / region.h,
@@ -970,6 +996,7 @@ mod tests {
                     let w = 128.min(level.width);
                     let h = 128.min(level.height);
                     let r = Region {
+                        sampling: 1,
                         preview: false,
                         series: level.series,
                         interleaved: level.interleaved,

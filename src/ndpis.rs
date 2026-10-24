@@ -170,6 +170,7 @@ mod tests {
         assert_eq!(coordinates.z, vec![0.0, 1000.0, 2000.0]);
         let mut settings = channels::defaults(&slide.channels);
         let mut region = Region {
+            sampling: 1,
             preview: false,
             series: 0,
             interleaved: slide.levels[0].interleaved,

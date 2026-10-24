@@ -2,18 +2,9 @@
 use crate::{same_region, Slide, Viewer};
 use eframe::egui;
 
+#[derive(Default)]
 pub(super) struct State {
-    height: f32,
     pub start: Option<egui::Vec2>,
-}
-
-impl Default for State {
-    fn default() -> Self {
-        Self {
-            height: 150.0,
-            start: None,
-        }
-    }
 }
 
 impl Viewer {
@@ -36,7 +27,7 @@ impl Viewer {
 
     pub(crate) fn navigator_rect(&self, canvas: egui::Rect) -> Option<egui::Rect> {
         self.slide.as_ref()?;
-        let height = self.features.navigator.height.min(canvas.height() * 0.35);
+        let height = self.preferences.map_height.min(canvas.height() * 0.35);
         let width = (height * 1.4).min(canvas.width() * 0.4);
         Some(egui::Rect::from_min_size(
             egui::pos2(
@@ -157,8 +148,7 @@ impl Viewer {
         ui.separator();
         ui.heading("Navigator");
         ui.add(
-            egui::Slider::new(&mut self.features.navigator.height, 100.0..=320.0)
-                .text("Map height"),
+            egui::Slider::new(&mut self.preferences.map_height, 100.0..=320.0).text("Map height"),
         );
         ui.checkbox(&mut self.features.tracking.show, "Show visited areas");
         ui.checkbox(&mut self.features.tracking.recording, "Record navigation");
@@ -179,7 +169,16 @@ impl Viewer {
             self.plane + 1,
             self.features.tracking.percent(self.plane)
         ));
-        ui.small("Green marks loaded views held for 350 ms. Brighter green means higher zoom. Approximate image area, not tissue reviewed. Saved per image and Z plane.");
+        ui.small("Green marks loaded views held for 350 ms. Darker green means higher zoom. Approximate image area, not tissue reviewed. Saved per image and Z plane.");
+        ui.horizontal_wrapped(|ui| {
+            for (level, label) in [(1, "25%"), (2, "50%"), (3, "100%"), (4, "200%+")] {
+                let (rect, _) =
+                    ui.allocate_exact_size(egui::vec2(14.0, 14.0), egui::Sense::hover());
+                ui.painter()
+                    .rect_filled(rect, 2.0, crate::tracking::color(level));
+                ui.small(label);
+            }
+        });
         if ui.button("Export track map SVG…")
             .on_hover_text("Export the current Z plane and zoom filter as a labelled map in the original slide orientation.")
             .clicked()

@@ -38,6 +38,7 @@ fn linked_position(before: Position, after: Position, target: Position) -> Posit
 }
 
 pub(super) struct Comparison {
+    preferences_save_at: Option<Instant>,
     updates: updates::Updates,
     library: crate::library::Library,
     tabs: [Vec<PathBuf>; 2],
@@ -54,6 +55,7 @@ pub(super) struct Comparison {
 impl Comparison {
     pub(super) fn new(left: Viewer, right: Viewer) -> Self {
         Self {
+            preferences_save_at: None,
             updates: Default::default(),
             library: Default::default(),
             tabs: Default::default(),
@@ -68,6 +70,18 @@ impl Comparison {
         }
     }
 
+    fn save_preferences(&mut self) {
+        if self.viewers[0].benchmark.is_none() {
+            if let Some(path) = settings::Preferences::path() {
+                if let Err(error) = self.viewers[self.active].preferences.save(&path) {
+                    self.viewers[self.active].status =
+                        format!("Could not save navigation preferences: {error}");
+                    diagnostics::record(diagnostics::Event::SettingsSaveFailed);
+                }
+            }
+        }
+        self.preferences_save_at = None;
+    }
     fn budgets(&mut self) {
         // Hidden comparisons retain their state and still count against the cap.
         let two =
@@ -107,12 +121,14 @@ impl Comparison {
 
 impl eframe::App for Comparison {
     fn on_exit(&mut self, _: Option<&eframe::glow::Context>) {
+        self.save_preferences();
         for viewer in &mut self.viewers {
             viewer.finish();
         }
     }
 
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
+        let preferences_before = self.viewers[self.active].preferences;
         let previous_active = self.active;
         for viewer in &mut self.viewers {
             viewer.poll(ctx);
@@ -162,7 +178,18 @@ impl eframe::App for Comparison {
             }
         }
 
-        self.viewers[self.active].handle_overview_shortcut(ctx);
+        if self.library.open {
+            let viewer = &self.viewers[self.active];
+            let current = viewer
+                .pending_open
+                .as_deref()
+                .or_else(|| viewer.slide.as_ref().map(|s| s.path.as_path()));
+            if let Some(path) = self.library.cycle_shortcut(ctx, current) {
+                self.viewers[self.active].open(path);
+            }
+        } else {
+            self.viewers[self.active].handle_overview_shortcut(ctx);
+        }
         let benchmark = self.viewers[0].benchmark.is_some();
         if !benchmark {
             self.updates.show(ctx);
@@ -299,7 +326,9 @@ impl eframe::App for Comparison {
         let epoch = self.viewers[self.active].slide_epoch;
         let can_sync =
             self.split && self.linked && self.viewers.iter().all(|v| v.slide.is_some() && !v.fit);
-        self.viewers[self.active].handle_shortcuts(ctx);
+        if !self.library.open {
+            self.viewers[self.active].handle_shortcuts(ctx);
+        }
         for viewer in &mut self.viewers {
             viewer.apply_channel_changes(ctx);
         }
@@ -386,6 +415,20 @@ impl eframe::App for Comparison {
         for viewer in &mut self.viewers {
             viewer.observe_navigation(ctx);
         }
+        let preferences = self.viewers[self.active].preferences;
+        if preferences != preferences_before {
+            for viewer in &mut self.viewers {
+                viewer.preferences = preferences;
+            }
+            self.preferences_save_at = Some(Instant::now() + std::time::Duration::from_secs(1));
+        }
+        if let Some(deadline) = self.preferences_save_at {
+            if Instant::now() >= deadline {
+                self.save_preferences();
+            } else {
+                ctx.request_repaint_after(deadline.saturating_duration_since(Instant::now()));
+            }
+        }
         self.viewers[self.active].slide_info(ctx);
         let viewer = &mut self.viewers[self.active];
         viewer
@@ -417,6 +460,7 @@ mod tests {
                     viewer.cache.push(CachedRegion {
                         texture: texture.clone(),
                         region: Region {
+                            sampling: 1,
                             preview: false,
                             series: x as usize % 4,
                             interleaved: true,

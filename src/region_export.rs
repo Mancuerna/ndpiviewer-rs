@@ -79,6 +79,7 @@ pub(crate) fn export(job: Job, cancel: &AtomicBool, progress: &AtomicU32) -> Res
                 return Err("Export cancelled.".into());
             }
             let region = Region {
+                sampling: 1,
                 preview: false,
                 series: level.series,
                 interleaved: level.interleaved,

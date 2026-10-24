@@ -162,12 +162,13 @@ impl Viewer {
                 self.plane = (self.plane + 1).min(self.slide.as_ref().unwrap().planes - 1);
                 self.changed();
             }
+            let step_size = self.preferences.arrow_step;
             let mut delta = egui::Vec2::ZERO;
             for (key, step) in [
-                (egui::Key::ArrowLeft, egui::vec2(-100.0, 0.0)),
-                (egui::Key::ArrowRight, egui::vec2(100.0, 0.0)),
-                (egui::Key::ArrowUp, egui::vec2(0.0, -100.0)),
-                (egui::Key::ArrowDown, egui::vec2(0.0, 100.0)),
+                (egui::Key::ArrowLeft, egui::vec2(-step_size, 0.0)),
+                (egui::Key::ArrowRight, egui::vec2(step_size, 0.0)),
+                (egui::Key::ArrowUp, egui::vec2(0.0, -step_size)),
+                (egui::Key::ArrowDown, egui::vec2(0.0, step_size)),
             ] {
                 if i.key_pressed(key) {
                     delta += step;
@@ -207,6 +208,27 @@ mod tests {
         );
     }
 
+    #[test]
+    fn configured_arrow_step_follows_zoom_and_orientation_and_survives_open() {
+        let (mut viewer, _) = crate::tests::tile_viewer();
+        let ctx = egui::Context::default();
+        viewer.preferences.arrow_step = 350.0;
+        viewer.preferences.map_height = 275.0;
+        viewer.zoom = 0.5;
+        viewer.features.rotation = 1;
+        let before = viewer.center;
+        let expected = viewer.inverse_transform(egui::vec2(350.0, 0.0)) / viewer.zoom;
+        frame(
+            &mut viewer,
+            &ctx,
+            egui::Key::ArrowRight,
+            egui::Modifiers::NONE,
+        );
+        assert_eq!(viewer.center - before, expected);
+        viewer.open("another.ndpi".into());
+        assert_eq!(viewer.preferences.arrow_step, 350.0);
+        assert_eq!(viewer.preferences.map_height, 275.0);
+    }
     #[test]
     fn tools_focus_and_magnification_obey_modifiers() {
         let (mut viewer, _) = crate::tests::tile_viewer();

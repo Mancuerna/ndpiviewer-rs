@@ -54,6 +54,7 @@ pub(crate) fn load(path: PathBuf) -> Result<Vec<(String, egui::ColorImage)>, Str
         };
         let factor = (1024.0 / m.size_x.max(m.size_y) as f64).min(1.0);
         let region = Region {
+            sampling: 1,
             preview: true,
             series,
             interleaved: ifd.is_some_and(|i| i.get(65426).is_some()) || m.is_interleaved,
