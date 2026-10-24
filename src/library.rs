@@ -16,6 +16,7 @@ pub(crate) fn thumbnail(path: PathBuf) -> Result<egui::ColorImage, String> {
     let level = slide.levels.last().ok_or("No pyramid level")?;
     let factor = (192.0 / level.width.max(level.height) as f64).min(1.0);
     let r = Region {
+        sampling: 1,
         preview: true,
         series: level.series,
         interleaved: level.interleaved,
@@ -36,6 +37,8 @@ type Thumbnail = (PathBuf, Result<egui::ColorImage, String>);
 #[derive(Default)]
 pub(crate) struct Library {
     pub open: bool,
+    selected: Option<PathBuf>,
+    scroll_to_selection: bool,
     folder: Option<PathBuf>,
     paths: Vec<PathBuf>,
     filter: String,
@@ -46,6 +49,64 @@ pub(crate) struct Library {
 }
 
 impl Library {
+    /// Tab cycles matching slides in this library; text fields retain normal Tab behavior.
+    pub fn cycle_shortcut(
+        &mut self,
+        ctx: &egui::Context,
+        current: Option<&Path>,
+    ) -> Option<PathBuf> {
+        if !self.open
+            || self.scan.is_some()
+            || ctx.memory(|m| m.any_popup_open() || m.has_focus(egui::Id::new("library-filter")))
+        {
+            return None;
+        }
+        // Read modifiers from the key event: Shift may already be released by this frame.
+        let modifiers = ctx.input(|i| {
+            i.events.iter().find_map(|event| match event {
+                egui::Event::Key {
+                    key: egui::Key::Tab,
+                    pressed: true,
+                    modifiers,
+                    ..
+                } if *modifiers == egui::Modifiers::NONE
+                    || *modifiers == egui::Modifiers::SHIFT =>
+                {
+                    Some(*modifiers)
+                }
+                _ => None,
+            })
+        })?;
+        let backward = modifiers.shift;
+        if !ctx.input_mut(|i| i.consume_key(modifiers, egui::Key::Tab)) {
+            return None;
+        }
+        ctx.memory_mut(|m| {
+            let id = egui::Id::new("library-cycle-focus");
+            m.interested_in_focus(id, egui::LayerId::background());
+            m.surrender_focus(id);
+        });
+        let query = self.filter.to_lowercase();
+        let paths: Vec<_> = self
+            .paths
+            .iter()
+            .filter(|p| {
+                supported(p)
+                    && !p.is_dir()
+                    && p.file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_lowercase()
+                        .contains(&query)
+            })
+            .cloned()
+            .collect();
+        let selected = cycle_path(&paths, current.or(self.selected.as_deref()), backward)?;
+        self.selected = Some(selected.clone());
+        self.scroll_to_selection = true;
+        Some(selected)
+    }
+
     fn scan(&mut self, ctx: &egui::Context, folder: PathBuf) {
         if self.scan.is_some() {
             return;
@@ -88,6 +149,7 @@ impl Library {
                     self.folder = Some(folder);
                     self.paths = paths;
                     self.filter.clear();
+                    self.selected = None;
                     self.cache.clear();
                 }
                 Err(e) => {
@@ -158,9 +220,9 @@ impl Library {
                     ui.label(path.display().to_string());
                 }
                 ui.add(
-                    egui::TextEdit::singleline(&mut self.filter).hint_text("Filter by filename"),
+                    egui::TextEdit::singleline(&mut self.filter).id(egui::Id::new("library-filter")).hint_text("Filter by filename"),
                 );
-                ui.small("Open a slide in the active pane. Thumbnails load as you browse.");
+                ui.small("Tab / Shift+Tab: next / previous slide in this library. Thumbnails load as you browse.");
                 if self.scan.is_some() {
                     ui.label("Reading folder…");
                 }
@@ -182,7 +244,14 @@ impl Library {
                 if filtered.is_empty() && self.scan.is_none() {
                     ui.label("No matching slides or folders.");
                 }
-                egui::ScrollArea::vertical().show_rows(ui, 98.0, filtered.len(), |ui, range| {
+                let mut scroll = egui::ScrollArea::vertical();
+                if self.scroll_to_selection {
+                    if let Some(index) = filtered.iter().position(|p| Some(p.as_path()) == self.selected.as_deref()) {
+                        scroll = scroll.vertical_scroll_offset(index as f32 * (98.0 + ui.spacing().item_spacing.y));
+                    }
+                    self.scroll_to_selection = false;
+                }
+                scroll.show_rows(ui, 98.0, filtered.len(), |ui, range| {
                     for row in range {
                         let path = filtered[row];
                         ui.push_id(path, |ui| {
@@ -233,9 +302,9 @@ impl Library {
                                     next_thumbnail.get_or_insert_with(|| path.clone());
                                 }
                                 ui.vertical(|ui| {
-                                    ui.label(
-                                        path.file_name().unwrap_or_default().to_string_lossy(),
-                                    );
+                                    let name = path.file_name().unwrap_or_default().to_string_lossy();
+                                    if self.selected.as_ref() == Some(path) { ui.colored_label(egui::Color32::LIGHT_BLUE, name); }
+                                    else { ui.label(name); }
                                     if path.is_dir() {
                                         if ui
                                             .add_enabled(
@@ -258,6 +327,9 @@ impl Library {
                     }
                 });
             });
+        if let Some(path) = &selected {
+            self.selected = Some(path.clone());
+        }
         self.open = open && selected.is_none();
         if let Some(folder) = folder {
             self.scan(ctx, folder);
@@ -271,5 +343,90 @@ impl Library {
             }
         }
         selected
+    }
+}
+
+fn cycle_path(paths: &[PathBuf], current: Option<&Path>, backward: bool) -> Option<PathBuf> {
+    if paths.is_empty() {
+        return None;
+    }
+    let index = paths.iter().position(|p| Some(p.as_path()) == current);
+    let next = match (index, backward) {
+        (Some(i), false) => (i + 1) % paths.len(),
+        (Some(i), true) => (i + paths.len() - 1) % paths.len(),
+        (None, false) => 0,
+        (None, true) => paths.len() - 1,
+    };
+    Some(paths[next].clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn library_cycle_wraps_in_both_directions() {
+        let paths: Vec<_> = ["a.ndpi", "b.ndpi", "c.ndpis"]
+            .into_iter()
+            .map(PathBuf::from)
+            .collect();
+        assert_eq!(cycle_path(&paths, None, false), Some(paths[0].clone()));
+        assert_eq!(
+            cycle_path(&paths, Some(&paths[2]), false),
+            Some(paths[0].clone())
+        );
+        assert_eq!(
+            cycle_path(&paths, Some(&paths[0]), true),
+            Some(paths[2].clone())
+        );
+        assert_eq!(
+            cycle_path(&paths[..1], Some(&paths[0]), false),
+            Some(paths[0].clone())
+        );
+        assert!(cycle_path(&[], None, false).is_none());
+    }
+    #[test]
+    fn library_tab_filters_slides_and_respects_text_focus_and_modifiers() {
+        let ctx = egui::Context::default();
+        let mut library = Library {
+            open: true,
+            paths: vec!["a.ndpi".into(), "b.ndpi".into(), "notes.txt".into()],
+            ..Default::default()
+        };
+        for (modifiers, text_focus, expected) in [
+            (egui::Modifiers::CTRL, false, None),
+            (egui::Modifiers::NONE, true, None),
+            (egui::Modifiers::NONE, false, Some(PathBuf::from("a.ndpi"))),
+            (egui::Modifiers::SHIFT, false, Some(PathBuf::from("b.ndpi"))),
+        ] {
+            let _ = ctx.run(
+                egui::RawInput {
+                    events: vec![egui::Event::Key {
+                        key: egui::Key::Tab,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                    }],
+                    modifiers: egui::Modifiers::NONE,
+                    ..Default::default()
+                },
+                |ctx| {
+                    let id = egui::Id::new("library-filter");
+                    ctx.memory_mut(|m| {
+                        if text_focus {
+                            m.request_focus(id);
+                        } else {
+                            m.surrender_focus(id);
+                        }
+                    });
+                    assert_eq!(library.cycle_shortcut(ctx, None), expected);
+                },
+            );
+        }
+        library.filter = "b".into();
+        assert_eq!(
+            cycle_path(&[PathBuf::from("b.ndpi")], None, false),
+            Some("b.ndpi".into())
+        );
     }
 }

@@ -53,33 +53,56 @@ impl Viewer {
         if min.x >= max.x || min.y >= max.y {
             return vec![];
         }
+        let desired = (self.zoom * self.pixel_ratio).min(1.0);
         let chosen = slide
             .levels
             .iter()
-            .rposition(|l| l.width as f32 / slide.width as f32 >= self.zoom.min(1.0))
+            .rposition(|l| {
+                (l.width as f32 / slide.width as f32).min(l.height as f32 / slide.height as f32)
+                    >= desired
+            })
             .unwrap_or(0);
-        for level in &slide.levels[chosen..] {
-            let sx = level.width as f32 / slide.width as f32;
-            let sy = level.height as f32 / slide.height as f32;
-            let x0 = (min.x * sx).floor() as u32 / TILE_SIZE;
-            let y0 = (min.y * sy).floor() as u32 / TILE_SIZE;
-            let x1 = ((max.x * sx).ceil() as u32)
-                .min(level.width)
-                .div_ceil(TILE_SIZE);
+        let level = &slide.levels[chosen];
+        let sx = level.width as f32 / slide.width as f32;
+        let sy = level.height as f32 / slide.height as f32;
+        // Fill gaps in sparse pyramids with filtered virtual levels, rather than
+        // magnifying a tiny macro image. Power-of-two grids remain reusable on pan.
+        let exponent = (sx.min(sy) / desired)
+            .max(1.0)
+            .log2()
+            .floor()
+            .clamp(0.0, 16.0) as u32;
+        let mut sampling = 1_u32 << exponent;
+        // Leave room for the overview even at the smallest split-view budget.
+        let overview_bytes = self
+            .overview(self.plane)
+            .map_or(0, |r| r.w as usize * r.h as usize * 4);
+        let tile_limit = ((self.cache_budget / 2).saturating_sub(overview_bytes)
+            / (TILE_SIZE as usize * TILE_SIZE as usize * 4))
+            .clamp(1, MAX_VISIBLE_TILES);
+        loop {
+            let span = TILE_SIZE * sampling;
+            let x0 = (min.x * sx).floor() as u32 / span;
+            let y0 = (min.y * sy).floor() as u32 / span;
+            let x1 = ((max.x * sx).ceil() as u32).min(level.width).div_ceil(span);
             let y1 = ((max.y * sy).ceil() as u32)
                 .min(level.height)
-                .div_ceil(TILE_SIZE);
-            if ((x1 - x0) as usize) * ((y1 - y0) as usize) > MAX_VISIBLE_TILES {
+                .div_ceil(span);
+            if ((x1 - x0) as usize) * ((y1 - y0) as usize) > tile_limit {
+                sampling *= 2;
                 continue;
             }
             let mut tiles = Vec::new();
             for ty in y0..y1 {
                 for tx in x0..x1 {
-                    let x = tx * TILE_SIZE;
-                    let y = ty * TILE_SIZE;
-                    let w = TILE_SIZE.min(level.width - x);
-                    let h = TILE_SIZE.min(level.height - y);
+                    let x = tx * span;
+                    let y = ty * span;
+                    let source_w = span.min(level.width - x);
+                    let w = source_w.div_ceil(sampling);
+                    let source_h = span.min(level.height - y);
+                    let h = source_h.div_ceil(sampling);
                     tiles.push(Region {
+                        sampling,
                         preview: false,
                         series: level.series,
                         interleaved: level.interleaved,
@@ -88,7 +111,12 @@ impl Viewer {
                         y,
                         w,
                         h,
-                        world: [x as f32 / sx, y as f32 / sy, w as f32 / sx, h as f32 / sy],
+                        world: [
+                            x as f32 / sx,
+                            y as f32 / sy,
+                            source_w as f32 / sx,
+                            source_h as f32 / sy,
+                        ],
                     });
                 }
             }
@@ -104,7 +132,6 @@ impl Viewer {
             });
             return tiles;
         }
-        vec![] // The bounded overview handles very low zoom on huge slides.
     }
 
     pub(super) fn next_tile(&self, wanted: &[Region]) -> Option<Region> {
@@ -162,7 +189,7 @@ impl Viewer {
                 } else {
                     1
                 },
-                std::cmp::Reverse(r.series),
+                std::cmp::Reverse(((r.world[2] / r.w as f32) * 1000.0) as u64),
             )
         });
         for &i in &visible {
@@ -176,5 +203,34 @@ impl Viewer {
             touched.push(self.cache.remove(i));
         }
         self.cache.extend(touched);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn sparse_pyramid_keeps_screen_detail_and_bounds_tile_memory() {
+        let (mut viewer, _) = crate::tests::tile_viewer();
+        let slide = viewer.slide.as_mut().unwrap();
+        slide.levels.retain(|l| l.series == 0 || l.series == 5);
+        viewer.zoom = 0.1;
+        viewer.pixel_ratio = 2.0;
+        let tiles = viewer.visible_tiles(egui::vec2(1000.0, 700.0));
+        assert!(!tiles.is_empty() && tiles.len() <= MAX_VISIBLE_TILES);
+        for tile in &tiles {
+            assert_eq!(tile.series, 0);
+            assert!(tile.sampling > 1);
+            assert!(tile.w <= TILE_SIZE && tile.h <= TILE_SIZE);
+            assert!(tile.world[2] / tile.w as f32 * viewer.zoom * viewer.pixel_ratio <= 1.01);
+            let mut other_level = tile.clone();
+            other_level.sampling *= 2;
+            assert!(!same_region(tile, &other_level));
+        }
+        viewer.cache_budget = 48 * 1048576;
+        let tiles = viewer.visible_tiles(egui::vec2(3840.0, 2160.0));
+        let bytes: usize = tiles.iter().map(|r| r.w as usize * r.h as usize * 4).sum();
+        let overview = viewer.overview(0).unwrap();
+        assert!(bytes + overview.w as usize * overview.h as usize * 4 <= viewer.cache_budget / 2);
     }
 }

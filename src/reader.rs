@@ -154,6 +154,20 @@ pub(crate) fn decode_display(
         .set_series(region.series)
         .map_err(|e| e.to_string())?;
     let m = reader.metadata().clone();
+    if region.sampling > 1 && !region.preview {
+        let image = crate::resample::tile(region, [m.size_x, m.size_y], |x, y, w, h| {
+            let tile = Region {
+                sampling: 1,
+                x,
+                y,
+                w,
+                h,
+                ..region.clone()
+            };
+            decode_display(reader, &tile, settings).map(|(image, _)| image)
+        })?;
+        return Ok((image, start.elapsed().as_secs_f64() * 1000.0));
+    }
     if region.preview {
         // Some slides have no screen-sized pyramid level. Build a bounded
         // overview from small source regions instead of decoding a full plane.
@@ -163,6 +177,7 @@ pub(crate) fn decode_display(
                 let w = MAX_REGION.min(m.size_x - x);
                 let h = MAX_REGION.min(m.size_y - y);
                 let tile = Region {
+                    sampling: 1,
                     preview: false,
                     x,
                     y,

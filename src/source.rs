@@ -212,6 +212,18 @@ impl Source {
         let rgb = &decoded.as_ref().unwrap().1;
         let output = if r.preview {
             image::imageops::resize(rgb, r.w, r.h, image::imageops::FilterType::Triangle)
+        } else if r.sampling > 1 {
+            if r.x >= dimensions.0 || r.y >= dimensions.1 || r.w == 0 || r.h == 0 {
+                return Err("Stack region is outside the image.".into());
+            }
+            let w = r.w.saturating_mul(r.sampling).min(dimensions.0 - r.x);
+            let h = r.h.saturating_mul(r.sampling).min(dimensions.1 - r.y);
+            image::imageops::resize(
+                &image::imageops::crop_imm(rgb, r.x, r.y, w, h).to_image(),
+                r.w,
+                r.h,
+                image::imageops::FilterType::Triangle,
+            )
         } else {
             if r.w == 0
                 || r.h == 0
@@ -258,6 +270,7 @@ mod tests {
             let started = Instant::now();
             for plane in 0..21 {
                 let region = Region {
+                    sampling: 1,
                     preview: false,
                     series: 0,
                     interleaved: true,
@@ -304,6 +317,7 @@ mod tests {
         assert_eq!(slide.planes, 21);
         for z in 0..21 {
             let r = Region {
+                sampling: 1,
                 preview: false,
                 series: 0,
                 interleaved: true,

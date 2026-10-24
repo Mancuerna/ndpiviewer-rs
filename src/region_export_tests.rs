@@ -119,6 +119,7 @@ fn public_slides_export_original_resolution_and_embedded_images() {
         let expected = source
             .read_display(
                 &Region {
+                    sampling: 1,
                     preview: false,
                     series: slide.levels[0].series,
                     interleaved: slide.levels[0].interleaved,

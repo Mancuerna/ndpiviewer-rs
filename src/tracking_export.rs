@@ -28,7 +28,7 @@ impl Tracking {
             h + 250.0, h + 250.0, escape(name), plane + 1, width, height, self.percent(plane)
         );
         let _ = write!(svg, "<svg x=\"40\" y=\"100\" width=\"{w}\" height=\"{h}\" viewBox=\"0 0 256 256\" preserveAspectRatio=\"none\" shape-rendering=\"crispEdges\"><rect width=\"256\" height=\"256\" fill=\"#edf0f2\"/>");
-        let colors = ["#edf0f2", "#b6e5d2", "#70c8a3", "#29996e", "#075c40"];
+        let colors = COLORS.map(|[r, g, b]| format!("#{r:02x}{g:02x}{b:02x}"));
         if let Some(grid) = self.planes.get(&plane) {
             for y in 0..SIDE {
                 let mut x = 0;

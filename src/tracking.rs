@@ -6,6 +6,17 @@ use std::{
     time::{Duration, Instant},
 };
 
+pub(super) const COLORS: [[u8; 3]; 5] = [
+    [237, 240, 242],
+    [182, 229, 210],
+    [112, 200, 163],
+    [41, 153, 110],
+    [7, 92, 64],
+];
+pub(super) fn color(level: u8) -> egui::Color32 {
+    let [r, g, b] = COLORS[level.min(4) as usize];
+    egui::Color32::from_rgb(r, g, b)
+}
 const SIDE: usize = 256;
 const MAX_PLANES: usize = 128; // At most 8 MiB, independent of slide dimensions.
 const DWELL: Duration = Duration::from_millis(350);
@@ -197,11 +208,7 @@ impl Tracking {
                     map.min + egui::vec2(start as f32, y as f32) * cell,
                     map.min + egui::vec2(x as f32, (y + 1) as f32) * cell,
                 );
-                painter.rect_filled(
-                    rect,
-                    0.0,
-                    egui::Color32::from_rgba_unmultiplied(30, 230, 160, 45 + 25 * level),
-                );
+                painter.rect_filled(rect, 0.0, color(level));
             }
         }
     }

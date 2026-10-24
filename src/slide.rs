@@ -65,6 +65,8 @@ mod tests {
 }
 #[derive(Clone, Debug)]
 pub(crate) struct Region {
+    /// Number of source pixels averaged per output pixel on each axis.
+    pub(crate) sampling: u32,
     pub(crate) preview: bool,
     pub(crate) series: usize,
     pub(crate) interleaved: bool,
