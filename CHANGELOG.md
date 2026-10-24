@@ -5,13 +5,18 @@
 
 ### Features
 
-* improve low-zoom detail and configurable slide navigation ([092f3ca](https://github.com/Mancuerna/ndpiviewer-rs/commit/092f3caab37764e82966f9fc0f56c6202117fc11))
-* improve slide navigation and low-magnification detail ([06f6caa](https://github.com/Mancuerna/ndpiviewer-rs/commit/06f6caac279c5658ed58cfedd9f43356d41bedfc))
+* Remember tracking minimap size across slides and application restarts.
+* Cycle library slides with Tab and Shift+Tab while preserving text-field editing.
+* Configure and remember arrow-key movement in the Navigation menu.
+* Show higher visited zoom levels with darker tracking colors and a legend.
 
+### Performance
+
+* Improve low-magnification detail with filtered intermediate tiles and display-scale-aware rendering while retaining bounded tile caches.
 
 ### Fixes
 
-* display areas in square millimeters from 1000000 square micrometers ([9ac3ede](https://github.com/Mancuerna/ndpiviewer-rs/commit/9ac3ede16bc2844a1ad830b81ab628802f746c7e))
+* Display areas in mm² from 1,000,000 µm².
 
 ## [0.4.1](https://github.com/Mancuerna/ndpiviewer-rs/compare/v0.4.0...v0.4.1) (2026-10-23)
 
