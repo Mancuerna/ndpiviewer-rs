@@ -36,16 +36,18 @@ pub(crate) fn valid(points: &[[f32; 2]], calibration: Option<Calibration>) -> bo
 
 pub(super) fn label(points: &[[f32; 2]], calibration: Option<Calibration>) -> String {
     let radius = f64::from(points[1][0] - points[0][0]).abs() * spacing(calibration)[0] * 0.5;
-    let unit = if calibration.is_some() { "µm" } else { "px" };
+    let area = std::f64::consts::PI * radius * radius;
+    let area_label = if calibration.is_some() {
+        crate::calibration::area_label(area)
+    } else {
+        format!("{area:.2} px²")
+    };
     let radius_label = if calibration.is_some() {
         crate::calibration::length_label(radius)
     } else {
         format!("{radius:.2} px")
     };
-    format!(
-        "Radius {radius_label}\nArea {:.2} {unit}²",
-        std::f64::consts::PI * radius * radius
-    )
+    format!("Radius {radius_label}\nArea {area_label}")
 }
 
 #[cfg(test)]

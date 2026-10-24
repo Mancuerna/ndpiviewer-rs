@@ -172,13 +172,17 @@ impl Overlay {
         } else if a.tool == Tool::Polygon {
             let calibration = self.calibration;
             let (area, perimeter) = polygon::measures(&a.points, calibration);
-            let unit = if calibration.is_some() { "µm" } else { "px" };
+            let area_label = if calibration.is_some() {
+                calibration::area_label(area)
+            } else {
+                format!("{area:.2} px²")
+            };
             let perimeter_label = if calibration.is_some() {
                 calibration::length_label(perimeter)
             } else {
                 format!("{perimeter:.2} px")
             };
-            format!("Area {area:.2} {unit}²\nPerimeter {perimeter_label}")
+            format!("Area {area_label}\nPerimeter {perimeter_label}")
         } else {
             calibration::measurement(end - start, a.tool == Tool::Line, self.calibration)
         };

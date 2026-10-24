@@ -68,6 +68,15 @@ pub(super) fn length_label(microns: f64) -> String {
     }
 }
 
+/// Format a calibrated area without changing the underlying square-micrometre value.
+pub(super) fn area_label(square_microns: f64) -> String {
+    if square_microns >= 1_000_000.0 {
+        format!("{:.3} mm²", square_microns / 1_000_000.0)
+    } else {
+        format!("{square_microns:.2} µm²")
+    }
+}
+
 /// Choose a readable 1/2/5 length in viewport logical pixels, not device pixels.
 /// A horizontal screen bar follows source Y after a quarter-turn rotation.
 pub(super) fn scale_bar(
@@ -137,7 +146,7 @@ pub(super) fn measurement(
             } else {
                 format!("{} × {}", length_label(x), length_label(y))
             };
-            format!("{dimensions} · {:.2} µm²", x * y)
+            format!("{dimensions} · {}", area_label(x * y))
         }
     } else if line {
         format!("{:.1} px", dx.hypot(dy))
@@ -149,6 +158,21 @@ pub(super) fn measurement(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn area_units_switch_at_one_million_square_microns() {
+        for (area, expected) in [
+            (0.0, "0.00 µm²"),
+            (999_999.0, "999999.00 µm²"),
+            (1_000_000.0, "1.000 mm²"),
+            (1_250_000.0, "1.250 mm²"),
+        ] {
+            assert_eq!(area_label(area), expected);
+        }
+        assert_eq!(
+            measurement(egui::vec2(1000.0, 1000.0), false, None),
+            "1000 × 1000 px · 1000000 px²"
+        );
+    }
     #[test]
     fn length_units_switch_at_one_thousand_microns_only() {
         let c = Some(Calibration { x: 0.5, y: 1.0 });
@@ -169,7 +193,7 @@ mod tests {
         );
         assert_eq!(
             measurement(egui::vec2(2000.0, 1000.0), false, c),
-            "1.000 × 1.000 mm · 1000000.00 µm²"
+            "1.000 × 1.000 mm · 1.000 mm²"
         );
         let unit = Some(Calibration { x: 1.0, y: 1.0 });
         for (width, expected) in [(999.0, "500 µm"), (1000.0, "1 mm"), (2000.0, "2 mm")] {
