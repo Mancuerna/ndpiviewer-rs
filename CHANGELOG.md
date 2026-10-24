@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.0](https://github.com/Mancuerna/ndpiviewer-rs/compare/v0.4.1...v0.5.0) (2026-10-24)
+
+
+### Features
+
+* Remember tracking minimap size across slides and application restarts.
+* Cycle library slides with Tab and Shift+Tab while preserving text-field editing.
+* Configure and remember arrow-key movement in the Navigation menu.
+* Show higher visited zoom levels with darker tracking colors and a legend.
+
+### Performance
+
+* Improve low-magnification detail with filtered intermediate tiles and display-scale-aware rendering while retaining bounded tile caches.
+
+### Fixes
+
+* Display areas in mm² from 1,000,000 µm².
+
 ## [0.4.1](https://github.com/Mancuerna/ndpiviewer-rs/compare/v0.4.0...v0.4.1) (2026-10-23)
 
 
