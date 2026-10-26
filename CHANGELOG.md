@@ -3,9 +3,18 @@
 ## [0.6.0](https://github.com/Mancuerna/ndpiviewer-rs/compare/v0.5.0...v0.6.0) (2026-10-26)
 
 
+### Fixes
+
+* Fix glass-label loading when an NDPI acquisition mask reports RGB but contains only one channel. An unreadable auxiliary image no longer hides other embedded images.
+
 ### Features
 
-* add Windows file opening and faster automatic slide libraries ([#14](https://github.com/Mancuerna/ndpiviewer-rs/issues/14)) ([322deaa](https://github.com/Mancuerna/ndpiviewer-rs/commit/322deaa3011524c7acc40c380af1e5b1a76acf4c))
+* Open NDPI and NDPIS files directly from Windows, with installer registration for Open With and Default Apps.
+* Automatically load the opened slide's folder in the library.
+
+### Performance
+
+* Load two visible previews concurrently, reuse cached previews, and decode small previews once within a bounded pixel budget.
 
 ## [0.5.0](https://github.com/Mancuerna/ndpiviewer-rs/compare/v0.4.1...v0.5.0) (2026-10-24)
 
