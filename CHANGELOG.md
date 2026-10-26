@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.0](https://github.com/Mancuerna/ndpiviewer-rs/compare/v0.5.0...v0.6.0) (2026-10-26)
+
+
+### Features
+
+* add Windows file opening and faster automatic slide libraries ([#14](https://github.com/Mancuerna/ndpiviewer-rs/issues/14)) ([322deaa](https://github.com/Mancuerna/ndpiviewer-rs/commit/322deaa3011524c7acc40c380af1e5b1a76acf4c))
+
 ## [0.5.0](https://github.com/Mancuerna/ndpiviewer-rs/compare/v0.4.1...v0.5.0) (2026-10-24)
 
 
