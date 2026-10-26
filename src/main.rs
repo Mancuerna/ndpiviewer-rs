@@ -572,6 +572,13 @@ impl Viewer {
         }
     }
 }
+/// Windows passes the quoted document path as a single OS argument.
+fn startup_path(args: impl IntoIterator<Item = std::ffi::OsString>) -> Option<PathBuf> {
+    let mut args = args.into_iter();
+    let path = PathBuf::from(args.next()?);
+    (args.next().is_none() && library::supported(&path)).then_some(path)
+}
+
 fn main() -> eframe::Result {
     diagnostics::init();
     let result = eframe::run_native(
@@ -594,6 +601,8 @@ fn main() -> eframe::Result {
             if let Some((benchmark, path, budget)) = benchmark::Benchmark::from_args() {
                 viewer.cache_budget = budget;
                 viewer.benchmark = Some(benchmark);
+                viewer.open(path);
+            } else if let Some(path) = startup_path(std::env::args_os().skip(1)) {
                 viewer.open(path);
             }
             Ok(Box::new(comparison::Comparison::new(
@@ -671,6 +680,19 @@ mod tests {
             },
             reply_tx,
         )
+    }
+
+    #[test]
+    fn windows_document_arguments_preserve_spaces_unicode_and_reject_options() {
+        let path = std::ffi::OsString::from("C:\\Slides\\Sample with spaces \u{00e9}.NDPI");
+        assert_eq!(startup_path([path.clone()]), Some(PathBuf::from(path)));
+        assert!(startup_path(["--benchmark".into()]).is_none());
+        assert!(startup_path(["a.ndpi".into(), "b.ndpi".into()]).is_none());
+        assert!(startup_path(["notes.txt".into()]).is_none());
+        assert_eq!(
+            startup_path(["channels.ndpis".into()]),
+            Some(PathBuf::from("channels.ndpis"))
+        );
     }
 
     #[test]

@@ -89,7 +89,8 @@ pub(super) fn render(
     interleaved: bool,
     settings: &[Setting],
 ) -> Result<egui::ColorImage, String> {
-    let channels = if m.is_rgb { 3 } else { 1 };
+    // Hamamatsu masks can carry RGB=true with only one actual sample.
+    let channels = if m.is_rgb && m.size_c != 1 { 3 } else { 1 };
     let bytes = match m.pixel_type {
         PixelType::Uint8 => 1,
         PixelType::Uint16 => 2,
@@ -188,6 +189,29 @@ pub(super) fn render(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn single_sample_rgb_mask_renders_as_grayscale() {
+        let metadata = bioformats::metadata::ImageMetadata {
+            is_rgb: true,
+            size_c: 1,
+            ..Default::default()
+        };
+        let settings = defaults(&[Channel {
+            name: "Mask".into(),
+            color: [255; 3],
+        }]);
+        let image = render(&[0, 127, 255], [3, 1], &metadata, false, &settings).unwrap();
+        assert_eq!(
+            image.pixels,
+            vec![
+                egui::Color32::BLACK,
+                egui::Color32::from_gray(127),
+                egui::Color32::WHITE
+            ]
+        );
+        assert!(render(&[0, 127], [3, 1], &metadata, false, &settings).is_err());
+    }
+
     #[test]
     fn invalid_dimensions_and_transfer_values_return_errors_before_allocation() {
         let mut metadata = bioformats::metadata::ImageMetadata::default();

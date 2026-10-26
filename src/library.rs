@@ -43,7 +43,8 @@ pub(crate) struct Library {
     paths: Vec<PathBuf>,
     filter: String,
     scan: Option<Task<Scan>>,
-    thumbnail: Option<Task<Thumbnail>>,
+    thumbnails: Vec<(PathBuf, Task<Thumbnail>)>,
+    pending_folder: Option<PathBuf>,
     cache: VecDeque<(PathBuf, Result<egui::TextureHandle, String>)>,
     error: Option<String>,
 }
@@ -107,10 +108,31 @@ impl Library {
         Some(selected)
     }
 
-    fn scan(&mut self, ctx: &egui::Context, folder: PathBuf) {
-        if self.scan.is_some() {
+    pub fn follow_slide(&mut self, ctx: &egui::Context, path: &Path) {
+        if !supported(path) {
             return;
         }
+        self.selected = Some(path.to_path_buf());
+        self.scroll_to_selection = true;
+        if let Some(folder) = path.parent() {
+            if self.folder.as_deref() != Some(folder) {
+                self.scan(ctx, folder.to_path_buf());
+            } else {
+                self.pending_folder = None;
+            }
+        }
+    }
+
+    fn scan(&mut self, ctx: &egui::Context, folder: PathBuf) {
+        if self.scan.is_some() {
+            self.pending_folder = Some(folder);
+            return;
+        }
+        if self.folder.as_ref() != Some(&folder) {
+            self.paths.clear();
+            self.filter.clear();
+        }
+        self.folder = Some(folder.clone());
         self.error = None;
         self.scan = Some(Task::spawn(ctx, move || {
             let entries = std::fs::read_dir(&folder).map_err(|e| e.to_string())?;
@@ -149,8 +171,11 @@ impl Library {
                     self.folder = Some(folder);
                     self.paths = paths;
                     self.filter.clear();
-                    self.selected = None;
-                    self.cache.clear();
+                    if self.pending_folder.is_none()
+                        && !self.paths.iter().any(|p| Some(p) == self.selected.as_ref())
+                    {
+                        self.selected = None;
+                    }
                 }
                 Err(e) => {
                     crate::diagnostics::record(crate::diagnostics::Event::LibraryReadFailed);
@@ -158,8 +183,16 @@ impl Library {
                 }
             }
         }
-        if let Some((path, result)) = self.thumbnail.as_ref().and_then(Task::take) {
-            self.thumbnail = None;
+        if self.scan.is_none() {
+            if let Some(folder) = self.pending_folder.take() {
+                self.scan(ctx, folder);
+            }
+        }
+        for index in (0..self.thumbnails.len()).rev() {
+            let Some((path, result)) = self.thumbnails[index].1.take() else {
+                continue;
+            };
+            self.thumbnails.swap_remove(index);
             if self.paths.contains(&path) {
                 let texture = result.map(|image| {
                     ctx.load_texture(
@@ -180,7 +213,7 @@ impl Library {
         let mut open = self.open;
         let mut folder = None;
         let mut selected = None;
-        let mut next_thumbnail = None;
+        let mut next_thumbnails = Vec::new();
         egui::Window::new("Slide library")
             .open(&mut open)
             .default_size([660.0, 620.0])
@@ -213,6 +246,7 @@ impl Library {
                         )
                         .clicked()
                     {
+                        self.cache.clear();
                         folder = self.folder.clone();
                     }
                 });
@@ -299,7 +333,9 @@ impl Library {
                                     }
                                     self.cache.push_back(entry);
                                 } else {
-                                    next_thumbnail.get_or_insert_with(|| path.clone());
+                                    if !self.thumbnails.iter().any(|(p, _)| p == path) {
+                                        next_thumbnails.push(path.clone());
+                                    }
                                 }
                                 ui.vertical(|ui| {
                                     let name = path.file_name().unwrap_or_default().to_string_lossy();
@@ -334,12 +370,18 @@ impl Library {
         if let Some(folder) = folder {
             self.scan(ctx, folder);
         }
-        if self.thumbnail.is_none() && self.scan.is_none() {
-            if let Some(path) = next_thumbnail {
-                self.thumbnail = Some(Task::spawn(ctx, move || {
-                    let image = thumbnail(path.clone());
-                    (path, image)
-                }));
+        if self.scan.is_none() {
+            for path in next_thumbnails
+                .into_iter()
+                .take(2_usize.saturating_sub(self.thumbnails.len()))
+            {
+                self.thumbnails.push((
+                    path.clone(),
+                    Task::spawn(ctx, move || {
+                        let image = thumbnail(path.clone());
+                        (path, image)
+                    }),
+                ));
             }
         }
         selected
@@ -363,6 +405,94 @@ fn cycle_path(paths: &[PathBuf], current: Option<&Path>, backward: bool) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn following_slides_scans_the_folder_and_keeps_latest_request() {
+        let ctx = egui::Context::default();
+        let root =
+            std::env::temp_dir().join(format!("viewer-library-follow-{}", std::process::id()));
+        std::fs::create_dir_all(root.join("a")).unwrap();
+        std::fs::create_dir_all(root.join("b")).unwrap();
+        let a = root.join("a/one.ndpi");
+        let b = root.join("b/two.ndpis");
+        for p in [
+            &a,
+            &b,
+            &root.join("a/other.ndpi"),
+            &root.join("a/notes.txt"),
+        ] {
+            std::fs::write(p, []).unwrap();
+        }
+        let mut library = Library::default();
+        library.follow_slide(&ctx, &a);
+        library.follow_slide(&ctx, &b);
+        library.follow_slide(&ctx, &a); // A newer request cancels the queued folder.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while library.scan.is_some() || library.pending_folder.is_some() {
+            library.show(&ctx);
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert_eq!(library.folder.as_deref(), a.parent());
+        assert_eq!(library.selected, Some(a.clone()));
+        assert_eq!(library.paths.len(), 2);
+        library.filter = "one".into();
+        library.follow_slide(&ctx, &root.join("a/other.ndpi"));
+        assert!(library.scan.is_none());
+        assert_eq!(library.filter, "one");
+        library.follow_slide(&ctx, &b);
+        while library.scan.is_some() {
+            library.show(&ctx);
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert_eq!(library.paths, vec![b.clone()]);
+        assert_eq!(library.selected, Some(b));
+        assert!(library.filter.is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    #[ignore = "Requires downloaded public slides"]
+    fn public_preview_timings_and_embedded_images() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("example_images");
+        for name in [
+            "02B0669241M.ndpi",
+            "JNOC-GC2003.ndpi",
+            "JARE59-CD.ndpi",
+            "Hamamatsu_fluorescence_Manuel_Stritt/test3.ndpis",
+        ] {
+            let path = root.join(name);
+            let start = std::time::Instant::now();
+            let preview = thumbnail(path.clone()).unwrap();
+            println!(
+                "{name}: thumbnail {:?}, {:?}",
+                preview.size,
+                start.elapsed()
+            );
+            let start = std::time::Instant::now();
+            let embedded = crate::associated::load(path.clone()).unwrap();
+            println!(
+                "{name}: {} embedded images, {:?}",
+                embedded.len(),
+                start.elapsed()
+            );
+            assert!(!embedded.is_empty());
+            for (index, (_, image)) in embedded.iter().enumerate() {
+                let bytes: Vec<_> = image.pixels.iter().flat_map(|p| p.to_array()).collect();
+                image::save_buffer(
+                    std::env::temp_dir().join(format!(
+                        "viewer-label-{}-{index}.png",
+                        path.file_stem().unwrap().to_string_lossy()
+                    )),
+                    &bytes,
+                    image.size[0] as u32,
+                    image.size[1] as u32,
+                    image::ColorType::Rgba8,
+                )
+                .unwrap();
+            }
+        }
+    }
     #[test]
     fn library_cycle_wraps_in_both_directions() {
         let paths: Vec<_> = ["a.ndpi", "b.ndpi", "c.ndpis"]
