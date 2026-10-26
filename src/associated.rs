@@ -3,7 +3,17 @@ use crate::{background::Task, channels, reader, Region};
 use eframe::egui;
 use std::path::PathBuf;
 
+struct Images {
+    images: Vec<(String, egui::ColorImage)>,
+    warnings: Vec<String>,
+}
+
+#[cfg(test)]
 pub(crate) fn load(path: PathBuf) -> Result<Vec<(String, egui::ColorImage)>, String> {
+    load_images(path).map(|loaded| loaded.images)
+}
+
+fn load_images(path: PathBuf) -> Result<Images, String> {
     if path.is_dir() {
         return Err("Image folders do not contain embedded slide images.".into());
     }
@@ -19,7 +29,7 @@ pub(crate) fn load(path: PathBuf) -> Result<Vec<(String, egui::ColorImage)>, Str
         path
     };
     let mut decoder = bioformats::ImageReader::open(&ndpi).map_err(|e| e.to_string())?;
-    let slide = reader::inspect(&mut decoder, ndpi.clone())?;
+    let base = decoder.metadata().clone();
     let file = std::fs::File::open(&ndpi).map_err(|e| e.to_string())?;
     let large = file.metadata().map_err(|e| e.to_string())?.len() >= 1u64 << 32;
     let mut parser = bioformats::tiff::parser::TiffParser::new(std::io::BufReader::new(file))
@@ -31,22 +41,35 @@ pub(crate) fn load(path: PathBuf) -> Result<Vec<(String, egui::ColorImage)>, Str
     }
     .map_err(|e| e.to_string())?;
     let mut images = Vec::new();
+    let mut warnings = Vec::new();
     for series in 0..decoder.series_count() {
-        if slide.levels.iter().any(|l| l.series == series) {
-            continue;
-        }
         if images.len() >= 8 {
             break;
         }
         decoder.set_series(series).map_err(|e| e.to_string())?;
         let m = decoder.metadata().clone();
-        if m.size_x == 0 || m.size_y == 0 || m.is_indexed {
+        if m.size_x == 0 || m.size_y == 0 {
             continue;
         }
-        let ifd = ifds
-            .iter()
-            .find(|i| i.image_width() == Some(m.size_x) && i.image_length() == Some(m.size_y));
+        let ifd = ifds.iter().find(|i| {
+            i.image_width() == Some(m.size_x)
+                && i.image_length() == Some(m.size_y)
+                && i.samples_per_pixel() as u32 == m.size_c
+        });
         let lens = ifd.and_then(|i| i.get_vec_f64(65421).first().copied());
+        // Vendor identification takes precedence over dimensions: macro images
+        // may have the same aspect ratio as a single-plane diagnostic image.
+        let named = m.series_metadata.contains_key("ndpi.image_type");
+        let aspect_error = ((m.size_x as f64 / m.size_y as f64)
+            / (base.size_x as f64 / base.size_y.max(1) as f64)
+            - 1.0)
+            .abs();
+        if !named
+            && !matches!(lens, Some(-1.0 | -2.0))
+            && (series == 0 || (m.size_z == base.size_z && aspect_error < 0.01))
+        {
+            continue;
+        }
         let title = match lens {
             Some(-1.0) => "Glass slide / label (as captured)".to_string(),
             Some(-2.0) => "Acquisition map / mask".to_string(),
@@ -65,7 +88,7 @@ pub(crate) fn load(path: PathBuf) -> Result<Vec<(String, egui::ColorImage)>, Str
             h: (m.size_y as f64 * factor).round().max(1.0) as u32,
             world: [0.0, 0.0, m.size_x as f32, m.size_y as f32],
         };
-        let bands = if m.is_rgb {
+        let bands = if m.is_rgb && m.size_c == 3 {
             channels::rgb_channels()
         } else {
             vec![channels::Channel {
@@ -73,14 +96,22 @@ pub(crate) fn load(path: PathBuf) -> Result<Vec<(String, egui::ColorImage)>, Str
                 color: [255; 3],
             }]
         };
-        let (pixels, _) =
-            reader::decode_display(&mut decoder, &region, &channels::defaults(&bands))?;
-        images.push((format!("{title} · {} × {} px", m.size_x, m.size_y), pixels));
+        let decoded = if m.is_indexed {
+            Err("Indexed embedded images are not supported.".into())
+        } else {
+            reader::decode_display(&mut decoder, &region, &channels::defaults(&bands))
+        };
+        match decoded {
+            Ok((pixels, _)) => {
+                images.push((format!("{title} · {} × {} px", m.size_x, m.size_y), pixels))
+            }
+            Err(error) => warnings.push(format!("{title}: {error}")),
+        }
     }
-    Ok(images)
+    Ok(Images { images, warnings })
 }
 
-type Loaded = (PathBuf, Result<Vec<(String, egui::ColorImage)>, String>);
+type Loaded = (PathBuf, Result<Images, String>);
 #[derive(Default)]
 pub(crate) struct Associated {
     pub open: bool,
@@ -88,6 +119,7 @@ pub(crate) struct Associated {
     task: Option<Task<Loaded>>,
     images: Vec<(String, egui::TextureHandle)>,
     error: Option<String>,
+    warnings: Vec<String>,
 }
 impl Associated {
     pub fn show(&mut self, ctx: &egui::Context, path: Option<&PathBuf>) {
@@ -95,18 +127,24 @@ impl Associated {
             self.open = false;
             self.images.clear();
             self.error = None;
+            self.warnings.clear();
             self.path = path.cloned();
         }
         if let Some((path, result)) = self.task.as_ref().and_then(Task::take) {
             self.task = None;
             if self.path.as_ref() == Some(&path) {
                 match result {
-                    Ok(images) => {
-                        if images.is_empty() {
-                            self.error =
-                                Some("This file has no embedded slide or label image.".into());
+                    Ok(loaded) => {
+                        self.warnings = loaded.warnings;
+                        if loaded.images.is_empty() {
+                            self.error = Some(if self.warnings.is_empty() {
+                                "No embedded glass-slide or label image was recognized in this file."
+                            } else {
+                                "Embedded images could not be decoded. See the details below."
+                            }.into());
                         }
-                        self.images = images
+                        self.images = loaded
+                            .images
                             .into_iter()
                             .map(|(name, image)| {
                                 let texture = ctx.load_texture(
@@ -134,7 +172,7 @@ impl Associated {
             if let Some(path) = path {
                 let path = path.clone();
                 self.task = Some(Task::spawn(ctx, move || {
-                    let images = load(path.clone());
+                    let images = load_images(path.clone());
                     (path, images)
                 }));
             }
@@ -143,6 +181,7 @@ impl Associated {
             ui.small("Embedded images from the file. The label is shown only if it was captured; it may be part of the glass-slide image. For NDPIS, these images come from its first channel.");
             if self.task.is_some() { ui.label("Loading embedded images…"); }
             if let Some(error) = &self.error { ui.label(error); }
+            for warning in &self.warnings { ui.colored_label(egui::Color32::LIGHT_RED, warning); }
             egui::ScrollArea::vertical().show(ui, |ui| {
                 for (name, texture) in &self.images {
                     ui.heading(name);
@@ -151,5 +190,26 @@ impl Associated {
                 }
             });
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    #[ignore = "Requires the public large cytology sample"]
+    fn cytology_keeps_label_and_single_channel_mask() {
+        let path =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("example_images/02B0669241M.ndpi");
+        let result = load_images(path).unwrap();
+        assert!(result.warnings.is_empty(), "{:?}", result.warnings);
+        assert_eq!(result.images.len(), 2);
+        assert!(result.images[0].0.starts_with("Glass slide"));
+        assert!(result.images[1].0.starts_with("Acquisition map"));
+        assert!(result.images[0]
+            .1
+            .pixels
+            .iter()
+            .any(|p| p.r() > 100 && p.g() > 100));
     }
 }

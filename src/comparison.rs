@@ -139,6 +139,7 @@ impl eframe::App for Comparison {
                 if viewer.slide_epoch != self.recorded_epochs[index] {
                     if let Some(slide) = &viewer.slide {
                         self.recent.record(&slide.path);
+                        self.library.follow_slide(ctx, &slide.path);
                         if !self.tabs[index].contains(&slide.path) {
                             if self.tabs[index].len() >= 32 {
                                 self.tabs[index].remove(0);

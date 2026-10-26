@@ -52,6 +52,14 @@ pub(crate) fn inspect(reader: &mut ImageReader, path: PathBuf) -> Result<Slide, 
             && m.size_c == base.size_c
             && m.is_rgb == base.is_rgb
             && aspect_error < 0.01
+            && !m.series_metadata.contains_key("ndpi.image_type")
+            && !ifds.iter().any(|i| {
+                i.image_width() == Some(m.size_x)
+                    && i.image_length() == Some(m.size_y)
+                    && i.get_vec_f64(65421)
+                        .first()
+                        .is_some_and(|v| *v == -1.0 || *v == -2.0)
+            })
         {
             levels.push(Level {
                 series,
@@ -169,6 +177,34 @@ pub(crate) fn decode_display(
         return Ok((image, start.elapsed().as_secs_f64() * 1000.0));
     }
     if region.preview {
+        // Small pyramid and label images fit a strict pixel budget. Decode once:
+        // repeated region reads can decompress the same JPEG strip many times.
+        if u64::from(m.size_x) * u64::from(m.size_y) <= 4_000_000 {
+            let raw = reader.open_bytes(region.plane).map_err(|e| e.to_string())?;
+            let image = channels::render(
+                &raw,
+                [m.size_x as usize, m.size_y as usize],
+                &m,
+                region.interleaved,
+                settings,
+            )?;
+            let bytes: Vec<_> = image.pixels.iter().flat_map(|p| p.to_array()).collect();
+            let image = image::RgbaImage::from_raw(m.size_x, m.size_y, bytes)
+                .ok_or("Invalid preview dimensions")?;
+            let resized = image::imageops::resize(
+                &image,
+                region.w,
+                region.h,
+                image::imageops::FilterType::Triangle,
+            );
+            return Ok((
+                egui::ColorImage::from_rgba_unmultiplied(
+                    [region.w as usize, region.h as usize],
+                    resized.as_raw(),
+                ),
+                start.elapsed().as_secs_f64() * 1000.0,
+            ));
+        }
         // Some slides have no screen-sized pyramid level. Build a bounded
         // overview from small source regions instead of decoding a full plane.
         let mut pixels = vec![egui::Color32::BLACK; region.w as usize * region.h as usize];

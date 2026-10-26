@@ -61,10 +61,18 @@ jobs:
           $actual = @(Get-ChildItem $destination -File | Select-Object -ExpandProperty Name | Sort-Object)
           $expected = @('LICENSE.txt', 'NDPIViewer.exe', 'ThirdPartyNotices.txt', 'unins000.dat', 'unins000.exe') | Sort-Object
           if (Compare-Object $expected $actual) { throw 'Unexpected installed payload.' }
+          $command = (Get-Item 'HKCU:\Software\Classes\NDPIViewer.Slide\shell\open\command').GetValue('')
+          if ($command -cne ('"' + $destination + '\NDPIViewer.exe" "%1"')) { throw 'File-open command is not correctly quoted.' }
+          foreach ($extension in '.ndpi', '.ndpis') {
+            $registered = (Get-Item 'HKCU:\Software\NDPIViewer\Capabilities\FileAssociations').GetValue($extension)
+            if ($registered -ne 'NDPIViewer.Slide') { throw 'Default-app registration is missing.' }
+            if (!(Get-Item "HKCU:\Software\Classes\$extension\OpenWithProgids").GetValueNames().Contains('NDPIViewer.Slide')) { throw 'Open With registration is missing.' }
+          }
           python scripts/audit-windows.py "$destination/NDPIViewer.exe"
           if ($LASTEXITCODE -ne 0) { throw 'Installed executable audit failed.' }
           $process = Start-Process "$destination/unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
           if ($process.ExitCode -ne 0 -or (Test-Path "$destination/NDPIViewer.exe")) { throw 'Uninstallation failed.' }
+          if (Test-Path 'HKCU:\Software\Classes\NDPIViewer.Slide') { throw 'File association was not removed.' }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: inputs.release-tag == ''
         continue-on-error: true
