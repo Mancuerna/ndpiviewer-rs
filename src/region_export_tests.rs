@@ -19,6 +19,7 @@ fn native_export_matches_source_across_tiles_and_cancel_preserves_file() {
         annotations: vec![],
         scale: false,
         labels: false,
+        annotation_style: [2.0, 18.0],
         path: destination.clone(),
     };
     let cancelled = AtomicBool::new(false);
@@ -65,8 +66,11 @@ fn exported_overlays_include_scale_text_and_source_geometry() {
         &slide,
         [10, 20],
         &[annotation],
-        true,
-        true,
+        crate::export_overlay::Style {
+            scale: true,
+            labels: true,
+            annotation: [2.0, 18.0],
+        },
         &AtomicBool::new(false),
     )
     .unwrap();
@@ -110,6 +114,7 @@ fn public_slides_export_original_resolution_and_embedded_images() {
                 annotations: vec![],
                 scale: false,
                 labels: false,
+                annotation_style: [2.0, 18.0],
                 path: destination.clone(),
             },
             &AtomicBool::new(false),

@@ -60,32 +60,84 @@ mod tests {
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub(super) struct Preferences {
+    pub magnifications: [f64; 5],
+    pub field_overlap: f32,
+    pub prefetch_z: bool,
     pub map_height: f32,
     pub arrow_percent: f32,
+    pub wheel_magnification_steps: bool,
+    pub invert_zoom_wheel: bool,
     pub auto_hide_sidebar: bool,
     pub prefetch_neighbors: bool,
     pub show_minimap: bool,
     pub sidebar_override: Option<bool>,
     pub ui_scale: f32,
     pub label_thumbnails: bool,
+    pub bindings: crate::keybindings::Bindings,
+    pub wheel_presets: [bool; 10],
+    pub clean_show_minimap: bool,
+    pub clean_show_scale: bool,
+    pub annotation_color: [u8; 3],
+    pub annotation_width: f32,
+    pub annotation_text_size: f32,
 }
 impl Default for Preferences {
     fn default() -> Self {
         Self {
+            magnifications: [2.0, 4.0, 10.0, 20.0, 40.0],
+            field_overlap: 10.0,
+            prefetch_z: true,
             map_height: 150.0,
             arrow_percent: 25.0,
+            wheel_magnification_steps: false,
+            invert_zoom_wheel: false,
             auto_hide_sidebar: true,
             prefetch_neighbors: true,
             show_minimap: true,
             sidebar_override: None,
             ui_scale: 1.0,
             label_thumbnails: false,
+            bindings: Default::default(),
+            wheel_presets: [
+                false, true, false, true, false, true, true, true, false, false,
+            ],
+            clean_show_minimap: true,
+            clean_show_scale: true,
+            annotation_color: [125, 210, 220],
+            annotation_width: 2.0,
+            annotation_text_size: 18.0,
         }
     }
 }
 impl Preferences {
+    pub(crate) fn action_label(&self, action: crate::keybindings::Action) -> String {
+        crate::keybindings::MAG_ACTIONS
+            .iter()
+            .position(|a| *a == action)
+            .map_or_else(
+                || action.label().to_owned(),
+                |index| format!("Magnification {}×", self.magnifications[index]),
+            )
+    }
+
     fn valid(&self) -> bool {
-        self.ui_scale.is_finite()
+        self.magnifications
+            .iter()
+            .all(|v| crate::magnification::PRESETS.contains(v))
+            && self.field_overlap.is_finite()
+            && (0.0..=50.0).contains(&self.field_overlap)
+            && self.bindings.error().is_none()
+            && self
+                .wheel_presets
+                .iter()
+                .filter(|enabled| **enabled)
+                .count()
+                >= 2
+            && self.annotation_width.is_finite()
+            && (1.0..=6.0).contains(&self.annotation_width)
+            && self.annotation_text_size.is_finite()
+            && (12.0..=32.0).contains(&self.annotation_text_size)
+            && self.ui_scale.is_finite()
             && (0.75..=2.0).contains(&self.ui_scale)
             && self.map_height.is_finite()
             && (100.0..=320.0).contains(&self.map_height)
@@ -137,13 +189,30 @@ mod preference_tests {
         let root = std::env::temp_dir().join(format!("ndpi-navigation-{}", std::process::id()));
         let path = root.join("navigation.json");
         assert_eq!(Preferences::load(&path), Preferences::default());
+        let mut bindings = crate::keybindings::Bindings::default();
+        bindings.0[crate::keybindings::Action::Line as usize] =
+            crate::keybindings::Binding::plain(eframe::egui::Key::J);
         let expected = Preferences {
+            magnifications: [1.25, 2.5, 5.0, 20.0, 80.0],
+            field_overlap: 35.0,
+            prefetch_z: false,
             map_height: 275.0,
             arrow_percent: 35.0,
+            wheel_magnification_steps: true,
+            invert_zoom_wheel: true,
             show_minimap: false,
             sidebar_override: Some(false),
             ui_scale: 1.5,
             label_thumbnails: true,
+            bindings,
+            wheel_presets: [
+                true, false, true, false, true, false, false, false, false, false,
+            ],
+            clean_show_minimap: false,
+            clean_show_scale: false,
+            annotation_color: [210, 80, 110],
+            annotation_width: 4.0,
+            annotation_text_size: 26.0,
             ..Default::default()
         };
         expected.save(&path).unwrap();
@@ -160,6 +229,18 @@ mod preference_tests {
         assert_eq!(Preferences::load(&path), Preferences::default());
         assert!(Preferences {
             arrow_percent: f32::NAN,
+            ..expected
+        }
+        .save(&path)
+        .is_err());
+        assert!(Preferences {
+            wheel_presets: [false; 10],
+            ..expected
+        }
+        .save(&path)
+        .is_err());
+        assert!(Preferences {
+            annotation_width: f32::INFINITY,
             ..expected
         }
         .save(&path)

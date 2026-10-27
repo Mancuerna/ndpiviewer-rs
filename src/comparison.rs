@@ -1,7 +1,10 @@
+#[path = "comparison_tools.rs"]
+mod tools;
 use super::*;
 
 #[derive(Clone, Copy)]
 struct Position {
+    angle: f32,
     center: egui::Vec2,
     zoom: f32,
     rotation: u8,
@@ -11,6 +14,7 @@ struct Position {
 impl Position {
     fn of(viewer: &Viewer) -> Self {
         Self {
+            angle: viewer.features.angle,
             center: viewer.center,
             zoom: viewer.zoom,
             rotation: viewer.features.rotation,
@@ -24,20 +28,28 @@ impl Position {
 /// for each image's independent rotation and current pixel zoom.
 fn linked_position(before: Position, after: Position, target: Position) -> Position {
     let zoom = (target.zoom * (after.zoom / before.zoom)).clamp(0.0001, 8.0);
-    let screen_delta = orientation::forward(
-        (after.center - before.center) * after.zoom,
-        after.rotation,
-        after.mirrored,
+    let screen_delta = orientation::turn(
+        orientation::forward(
+            (after.center - before.center) * after.zoom,
+            after.rotation,
+            after.mirrored,
+        ),
+        after.angle,
     );
     Position {
         center: target.center
-            + orientation::inverse(screen_delta, target.rotation, target.mirrored) / zoom,
+            + orientation::inverse(
+                orientation::turn(screen_delta, -target.angle),
+                target.rotation,
+                target.mirrored,
+            ) / zoom,
         zoom,
         ..target
     }
 }
 
 pub(super) struct Comparison {
+    tools: tools::State,
     preferences_save_at: Option<Instant>,
     updates: updates::Updates,
     library: crate::library::Library,
@@ -55,6 +67,7 @@ pub(super) struct Comparison {
 impl Comparison {
     pub(super) fn new(left: Viewer, right: Viewer) -> Self {
         Self {
+            tools: Default::default(),
             preferences_save_at: None,
             updates: Default::default(),
             library: Default::default(),
@@ -98,6 +111,9 @@ impl Comparison {
     }
 
     fn synchronize(&mut self, before: Position) {
+        if self.synchronize_landmarks() {
+            return;
+        }
         let source = Position::of(&self.viewers[self.active]);
         if source.center == before.center && source.zoom == before.zoom {
             return;
@@ -132,6 +148,7 @@ impl eframe::App for Comparison {
         ctx.set_zoom_factor(preferences_before.ui_scale);
         self.library
             .set_label_mode(preferences_before.label_thumbnails);
+        self.poll_comparison_tools(ctx);
         let previous_active = self.active;
         for viewer in &mut self.viewers {
             viewer.poll(ctx);
@@ -214,13 +231,15 @@ impl eframe::App for Comparison {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(fullscreen));
             }
             if fullscreen
+                && !self.viewers[self.active].chrome.clean_view
                 && !ctx.wants_keyboard_input()
                 && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
             {
                 fullscreen = false;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
             }
-            egui::TopBottomPanel::top("comparison-controls").show(ctx, |ui| {
+            if !self.viewers[self.active].chrome.clean_view {
+                egui::TopBottomPanel::top("comparison-controls").show(ctx, |ui| {
                 ui.horizontal_wrapped(|ui| {
                     if ui.button("Slide library…").clicked() { self.library.open = true; }
                     ui.menu_button("Recent images", |ui| {
@@ -258,6 +277,7 @@ impl eframe::App for Comparison {
                         }
                     }
                     });
+                    self.comparison_tools_menu(ui);
                     self.viewers[self.active].toolbar(ui);
                     if self.split {
                         ui.selectable_value(&mut self.active, 0, "Left image");
@@ -269,55 +289,59 @@ impl eframe::App for Comparison {
 
                 });
             });
-            egui::TopBottomPanel::top("slide-tabs").show(ctx, |ui| {
-                ui.horizontal(|ui| {
-                    ui.label(if self.active == 0 { "Left:" } else { "Right:" });
-                    let mut selected = None;
-                    let mut closed = None;
-                    egui::ScrollArea::horizontal().show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            for (index, path) in self.tabs[self.active].iter().enumerate() {
-                                let active = self.viewers[self.active]
-                                    .slide
-                                    .as_ref()
-                                    .is_some_and(|s| &s.path == path);
-                                ui.push_id(index, |ui| {
-                                    if ui
-                                        .selectable_label(
-                                            active,
-                                            path.file_name().unwrap_or_default().to_string_lossy(),
-                                        )
-                                        .on_hover_text(path.display().to_string())
-                                        .clicked()
-                                        && !active
-                                    {
-                                        selected = Some(path.clone());
-                                    }
-                                    if ui.small_button("×").on_hover_text("Close tab").clicked() {
-                                        closed = Some(index);
-                                    }
-                                });
-                            }
+                egui::TopBottomPanel::top("slide-tabs").show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(if self.active == 0 { "Left:" } else { "Right:" });
+                        let mut selected = None;
+                        let mut closed = None;
+                        egui::ScrollArea::horizontal().show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                for (index, path) in self.tabs[self.active].iter().enumerate() {
+                                    let active = self.viewers[self.active]
+                                        .slide
+                                        .as_ref()
+                                        .is_some_and(|s| &s.path == path);
+                                    ui.push_id(index, |ui| {
+                                        if ui
+                                            .selectable_label(
+                                                active,
+                                                path.file_name()
+                                                    .unwrap_or_default()
+                                                    .to_string_lossy(),
+                                            )
+                                            .on_hover_text(path.display().to_string())
+                                            .clicked()
+                                            && !active
+                                        {
+                                            selected = Some(path.clone());
+                                        }
+                                        if ui.small_button("×").on_hover_text("Close tab").clicked()
+                                        {
+                                            closed = Some(index);
+                                        }
+                                    });
+                                }
+                            });
                         });
-                    });
-                    if let Some(index) = closed {
-                        let path = self.tabs[self.active].remove(index);
-                        if self.viewers[self.active]
-                            .slide
-                            .as_ref()
-                            .is_some_and(|s| s.path == path)
-                        {
-                            selected = self.tabs[self.active].last().cloned();
-                            if selected.is_none() {
-                                self.viewers[self.active].close();
+                        if let Some(index) = closed {
+                            let path = self.tabs[self.active].remove(index);
+                            if self.viewers[self.active]
+                                .slide
+                                .as_ref()
+                                .is_some_and(|s| s.path == path)
+                            {
+                                selected = self.tabs[self.active].last().cloned();
+                                if selected.is_none() {
+                                    self.viewers[self.active].close();
+                                }
                             }
                         }
-                    }
-                    if let Some(path) = selected {
-                        self.viewers[self.active].open(path);
-                    }
+                        if let Some(path) = selected {
+                            self.viewers[self.active].open(path);
+                        }
+                    });
                 });
-            });
+            }
             if let Some(path) = self.library.show(ctx) {
                 self.viewers[self.active].open(path);
             }
@@ -335,7 +359,17 @@ impl eframe::App for Comparison {
         for viewer in &mut self.viewers {
             viewer.apply_channel_changes(ctx);
         }
-        self.viewers[self.active].controls(ctx, &mut self.total_budget);
+        let clean_view = self.viewers[self.active].chrome.clean_view;
+        for viewer in &mut self.viewers {
+            viewer.chrome.clean_view = clean_view;
+        }
+        if self.tools.export.is_none() {
+            self.viewers[self.active].controls(ctx, &mut self.total_budget);
+        } else {
+            ctx.data_mut(|d| {
+                d.insert_temp(egui::Id::new("inspector-overlay-rect"), egui::Rect::NOTHING)
+            });
+        }
         self.budgets();
 
         egui::CentralPanel::default()
@@ -362,32 +396,52 @@ impl eframe::App for Comparison {
                                 } else {
                                     egui::Color32::LIGHT_GRAY
                                 };
-                                ui.horizontal_wrapped(|ui| {
-                                    let state = if self.active == index {
-                                        " · ACTIVE"
-                                    } else {
-                                        ""
-                                    };
-                                    ui.colored_label(color, format!("{side}{state} · {name}"));
-                                    if ui
-                                        .button("Open here…")
-                                        .on_hover_text("Open an image in this pane.")
-                                        .clicked()
-                                    {
-                                        self.viewers[self.active].features.cancel_gesture();
-                                        self.active = index;
-                                        self.viewers[index].choose_slide();
+                                if !self.viewers[self.active].chrome.clean_view
+                                    && (self.tools.export.is_none() || self.tools.export_names)
+                                {
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.add_space(24.0);
+                                        let state = if self.active == index {
+                                            " · ACTIVE"
+                                        } else {
+                                            ""
+                                        };
+                                        ui.colored_label(color, format!("{side}{state} · {name}"));
+                                        if self.tools.export.is_none()
+                                            && ui
+                                                .button("Open here…")
+                                                .on_hover_text("Open an image in this pane.")
+                                                .clicked()
+                                        {
+                                            self.viewers[self.active].features.cancel_gesture();
+                                            self.active = index;
+                                            self.viewers[index].choose_slide();
+                                        }
+                                    });
+                                    if let Some(slide) = &self.viewers[index].slide {
+                                        ui.label(format!(
+                                            "     Zoom {:.1}% · Z {} / {}",
+                                            self.viewers[index].zoom * 100.0,
+                                            self.viewers[index].plane + 1,
+                                            slide.planes,
+                                        ));
                                     }
-                                });
-                                if let Some(slide) = &self.viewers[index].slide {
-                                    ui.small(format!(
-                                        "Zoom {:.1}% · Z {} / {}",
-                                        self.viewers[index].zoom * 100.0,
-                                        self.viewers[index].plane + 1,
-                                        slide.planes,
-                                    ));
                                 }
                                 self.viewers[index].canvas(ui);
+                                if self.tools.aligning {
+                                    let p = self.viewers[index]
+                                        .canvas_rect()
+                                        .unwrap_or(ui.max_rect())
+                                        .center();
+                                    ui.painter().line_segment(
+                                        [p - egui::vec2(12.0, 0.0), p + egui::vec2(12.0, 0.0)],
+                                        egui::Stroke::new(2.0_f32, egui::Color32::WHITE),
+                                    );
+                                    ui.painter().line_segment(
+                                        [p - egui::vec2(0.0, 12.0), p + egui::vec2(0.0, 12.0)],
+                                        egui::Stroke::new(2.0_f32, egui::Color32::WHITE),
+                                    );
+                                }
                             });
                             pane.painter().rect_stroke(
                                 self.pane_rects[index].shrink(0.5),
@@ -509,6 +563,7 @@ mod tests {
 
     fn position(x: f32, y: f32, zoom: f32, rotation: u8) -> Position {
         Position {
+            angle: 0.0,
             center: egui::vec2(x, y),
             zoom,
             rotation,

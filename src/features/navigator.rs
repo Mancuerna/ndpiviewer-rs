@@ -26,7 +26,10 @@ impl Viewer {
     }
 
     pub(crate) fn navigator_rect(&self, canvas: egui::Rect) -> Option<egui::Rect> {
-        if !self.preferences.show_minimap {
+        if self.features.workflow.hide_marks
+            || !self.preferences.show_minimap
+            || (self.chrome.clean_view && !self.preferences.clean_show_minimap)
+        {
             return None;
         }
         self.slide.as_ref()?;

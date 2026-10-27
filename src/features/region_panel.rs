@@ -87,6 +87,10 @@ impl Viewer {
                         annotations,
                         scale: self.region_export.scale && slide.calibration.is_some(),
                         labels: self.region_export.labels,
+                        annotation_style: [
+                            self.preferences.annotation_width,
+                            self.preferences.annotation_text_size,
+                        ],
                         path,
                     },
                 );

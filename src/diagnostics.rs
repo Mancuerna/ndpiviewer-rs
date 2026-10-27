@@ -12,6 +12,7 @@ const MAX_FILES: usize = 5;
 static LOG: OnceLock<Mutex<Log>> = OnceLock::new();
 
 #[derive(Clone, Copy, Debug)]
+#[repr(usize)]
 pub(crate) enum Event {
     Started,
     Closed,
@@ -32,6 +33,41 @@ pub(crate) enum Event {
     ReportExportFailed,
     AssociatedImageFailed,
     LibraryReadFailed,
+}
+
+const EVENTS: [Event; 19] = [
+    Event::Started,
+    Event::Closed,
+    Event::StartupFailed,
+    Event::Panic,
+    Event::SlideOpenFailed,
+    Event::TileReadFailed,
+    Event::AutoContrastFailed,
+    Event::ReaderStopped,
+    Event::AnnotationLoadFailed,
+    Event::AnnotationSaveFailed,
+    Event::SettingsLoadFailed,
+    Event::SettingsSaveFailed,
+    Event::TrackingLoadFailed,
+    Event::TrackingSaveFailed,
+    Event::RegionExportFailed,
+    Event::ViewExportFailed,
+    Event::ReportExportFailed,
+    Event::AssociatedImageFailed,
+    Event::LibraryReadFailed,
+];
+static COUNTS: [std::sync::atomic::AtomicU64; 19] =
+    [const { std::sync::atomic::AtomicU64::new(0) }; 19];
+fn event_summary() -> String {
+    EVENTS
+        .iter()
+        .map(|&event| {
+            format!(
+                "{event:?}: {}\n",
+                COUNTS[event as usize].load(std::sync::atomic::Ordering::Relaxed)
+            )
+        })
+        .collect()
 }
 
 struct Log {
@@ -105,6 +141,7 @@ pub(crate) fn init() {
 }
 
 pub(crate) fn record(event: Event) {
+    COUNTS[event as usize].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     if let Some(log) = LOG.get() {
         // A panic while logging must never deadlock the panic hook.
         if let Ok(mut log) = log.try_lock() {
@@ -115,6 +152,27 @@ pub(crate) fn record(event: Event) {
 
 pub(crate) fn available() -> bool {
     LOG.get().is_some()
+}
+
+impl crate::Viewer {
+    pub(crate) fn diagnostic_export_button(&mut self, ui: &mut eframe::egui::Ui) {
+        if ui.button("Export anonymous diagnostics…").clicked() {
+            if let Some(path) = rfd::FileDialog::new()
+                .add_filter("Text", &["txt"])
+                .set_file_name("viewer-diagnostics.txt")
+                .save_file()
+            {
+                let mut text=format!("NDPI Viewer {}\nOS: {}\nCache budget MiB: {}\nCache used MiB: {:.1}\nCached tiles: {}\nReader busy: {}\nSlide loaded: {}\nZ planes: {}\nPyramid levels: {}\nChannels: {}\nCalibrated: {}\nPixel ratio: {}\nNo paths, image names, labels, annotations, pixel data or raw metadata are included.\n",env!("CARGO_PKG_VERSION"),std::env::consts::OS,self.cache_budget/1048576,self.cache_bytes() as f64/1048576.0,self.cache.len(),self.busy,self.slide.is_some(),self.slide.as_ref().map_or(0,|s|s.planes),self.slide.as_ref().map_or(0,|s|s.levels.len()),self.channels.settings.len(),self.slide.as_ref().is_some_and(|s|s.calibration.is_some()),self.pixel_ratio);
+                text.push_str(&event_summary());
+                self.status = match crate::export_file::write(&path, |file| {
+                    file.write_all(text.as_bytes()).map_err(|e| e.to_string())
+                }) {
+                    Ok(()) => "Anonymous diagnostics exported.".into(),
+                    Err(e) => format!("Diagnostic export failed: {e}"),
+                };
+            }
+        }
+    }
 }
 
 #[cfg(test)]

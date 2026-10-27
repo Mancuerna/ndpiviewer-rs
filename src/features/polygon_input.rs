@@ -18,7 +18,10 @@ impl Viewer {
         let Some(slide) = &self.slide else { return };
         let points = std::mem::take(&mut self.features.polygon_points);
         self.features.add_annotation(Annotation {
-            appearance: Default::default(),
+            appearance: crate::annotations::Appearance {
+                color: self.preferences.annotation_color,
+                ..Default::default()
+            },
             tool: Tool::Polygon,
             points,
             plane: self.plane,

@@ -38,6 +38,7 @@ type Thumbnail = (PathBuf, bool, Result<egui::ColorImage, String>);
 pub(crate) struct Library {
     pub open: bool,
     label_mode: bool,
+    sort: u8,
     selected: Option<PathBuf>,
     scroll_to_selection: bool,
     folder: Option<PathBuf>,
@@ -142,6 +143,7 @@ impl Library {
         }
         self.folder = Some(folder.clone());
         self.error = None;
+        let sort = self.sort;
         self.scan = Some(Task::spawn(ctx, move || {
             let entries = std::fs::read_dir(&folder).map_err(|e| e.to_string())?;
             let mut paths = Vec::new();
@@ -159,8 +161,19 @@ impl Library {
                 }
             }
             paths.sort_by_cached_key(|p| {
+                let metadata = p.metadata().ok();
+                let rank = match sort {
+                    1 => metadata
+                        .as_ref()
+                        .and_then(|m| m.modified().ok())
+                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                        .map_or(0, |t| t.as_secs()),
+                    2 => metadata.as_ref().map_or(0, |m| m.len()),
+                    _ => 0,
+                };
                 (
                     !p.is_dir(),
+                    std::cmp::Reverse(rank),
                     p.file_name()
                         .unwrap_or_default()
                         .to_string_lossy()
@@ -227,6 +240,11 @@ impl Library {
             .open(&mut open)
             .default_size([660.0, 620.0])
             .show(ctx, |ui| {
+                let before=self.sort;
+                egui::ComboBox::from_id_salt("library-sort").selected_text(["Name", "Newest first", "Largest first"][self.sort as usize]).show_ui(ui,|ui| {
+                    for (index,label) in ["Name", "Newest first", "Largest first"].into_iter().enumerate() { ui.selectable_value(&mut self.sort,index as u8,label); }
+                });
+                if before!=self.sort { folder=self.folder.clone(); }
                 ui.horizontal(|ui| {
                     if ui
                         .add_enabled(self.scan.is_none(), egui::Button::new("Choose folder…"))

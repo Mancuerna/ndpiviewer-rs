@@ -6,11 +6,14 @@ use eframe::egui;
 pub(crate) struct Overlay {
     pub center: egui::Vec2,
     pub zoom: f32,
+    pub angle: f32,
     pub rotation: u8,
     pub mirrored: [bool; 2],
     pub calibration: Option<calibration::Calibration>,
     pub show_scale: bool,
     pub show_labels: bool,
+    pub annotation_width: f32,
+    pub annotation_text_size: f32,
 }
 
 impl Viewer {
@@ -18,11 +21,16 @@ impl Viewer {
         Overlay {
             center: self.center,
             zoom: self.zoom,
+            angle: self.features.angle,
             rotation: self.features.rotation,
             mirrored: self.features.mirrored,
             calibration: self.slide.as_ref().and_then(|s| s.calibration),
-            show_scale: self.features.show_scale && self.shown_plane.is_some(),
+            show_scale: self.features.show_scale
+                && self.shown_plane.is_some()
+                && (!self.chrome.clean_view || self.preferences.clean_show_scale),
             show_labels: self.features.show_labels,
+            annotation_width: self.preferences.annotation_width,
+            annotation_text_size: self.preferences.annotation_text_size,
         }
     }
     pub(crate) fn paint_scale_bar(&self, ui: &egui::Ui, rect: egui::Rect, slide: &Slide) {
@@ -44,20 +52,35 @@ impl Viewer {
 impl Overlay {
     fn screen_point(&self, p: egui::Vec2, rect: egui::Rect) -> egui::Pos2 {
         rect.center()
-            + crate::orientation::forward(
-                (p - self.center) * self.zoom,
-                self.rotation,
-                self.mirrored,
+            + crate::orientation::turn(
+                crate::orientation::forward(
+                    (p - self.center) * self.zoom,
+                    self.rotation,
+                    self.mirrored,
+                ),
+                self.angle,
             )
     }
     pub(crate) fn paint_scale_bar(&self, ui: &egui::Ui, rect: egui::Rect, slide: &Slide) {
         if !self.show_scale || rect.width() < 140.0 || rect.height() < 80.0 {
             return;
         }
+        let calibration = slide.calibration.map(|c| {
+            let v = crate::orientation::inverse(
+                crate::orientation::turn(egui::Vec2::X, -self.angle),
+                self.rotation,
+                self.mirrored,
+            );
+            let spacing = (v.x as f64 * c.x).hypot(v.y as f64 * c.y);
+            calibration::Calibration {
+                x: spacing,
+                y: spacing,
+            }
+        });
         let Some(bar) = calibration::scale_bar(
-            slide.calibration,
+            calibration,
             self.zoom,
-            self.rotation,
+            0,
             160.0_f32.min(rect.width() - 64.0),
         ) else {
             return;
@@ -69,7 +92,7 @@ impl Overlay {
         let text = painter.layout_no_wrap(bar.label, font, egui::Color32::WHITE);
         let width = bar.width.max(text.size().x) + 24.0;
         let panel = egui::Rect::from_min_size(
-            egui::pos2(rect.left() + 16.0, rect.bottom() - 72.0),
+            egui::pos2(rect.left() + 30.0, rect.bottom() - 72.0),
             egui::vec2(width, 56.0),
         );
         painter.rect_filled(panel, 4.0, egui::Color32::from_black_alpha(210));
@@ -104,12 +127,20 @@ impl Overlay {
         let end = egui::vec2(last[0], last[1]);
         let p = self.screen_point(start, rect);
         let q = self.screen_point(end, rect);
-        if !egui::Rect::from_two_pos(p, q).expand(3.0).intersects(rect) {
+        let [lo, hi] = polygon::bounds(&a.points);
+        let mut visible = egui::Rect::NOTHING;
+        for point in [lo, [hi[0], lo[1]], hi, [lo[0], hi[1]]] {
+            visible.extend_with(self.screen_point(point.into(), rect));
+        }
+        if !visible.expand(3.0).intersects(rect) {
             return;
         }
         let painter = ui.painter().with_clip_rect(rect);
-        let outline = egui::Stroke::new(4.5_f32, egui::Color32::from_black_alpha(190));
-        let stroke = egui::Stroke::new(2.0_f32, color);
+        let outline = egui::Stroke::new(
+            self.annotation_width + 2.5,
+            egui::Color32::from_black_alpha(190),
+        );
+        let stroke = egui::Stroke::new(self.annotation_width, color);
         if a.tool == Tool::Polygon {
             let vertices: Vec<_> = a
                 .points
@@ -119,11 +150,15 @@ impl Overlay {
             painter.add(egui::Shape::closed_line(vertices.clone(), outline));
             painter.add(egui::Shape::closed_line(vertices, stroke));
         } else if a.tool == Tool::Circle {
-            let bounds = egui::Rect::from_two_pos(p, q);
+            let bounds = egui::Rect::from_two_pos(start.to_pos2(), end.to_pos2());
             let vertices: Vec<_> = (0..128)
                 .map(|i| {
                     let angle = i as f32 * std::f32::consts::TAU / 128.0;
-                    bounds.center() + egui::vec2(angle.cos(), angle.sin()) * bounds.size() * 0.5
+                    self.screen_point(
+                        bounds.center().to_vec2()
+                            + egui::vec2(angle.cos(), angle.sin()) * bounds.size() * 0.5,
+                        rect,
+                    )
                 })
                 .collect();
             painter.add(egui::Shape::closed_line(vertices.clone(), outline));
@@ -149,18 +184,15 @@ impl Overlay {
             painter.line_segment([p, q], outline);
             painter.line_segment([p, q], stroke);
         } else {
-            painter.rect_stroke(
-                egui::Rect::from_two_pos(p, q),
-                0.0,
-                outline,
-                egui::StrokeKind::Inside,
-            );
-            painter.rect_stroke(
-                egui::Rect::from_two_pos(p, q),
-                0.0,
-                stroke,
-                egui::StrokeKind::Inside,
-            );
+            let points = [
+                start,
+                egui::vec2(end.x, start.y),
+                end,
+                egui::vec2(start.x, end.y),
+            ]
+            .map(|p| self.screen_point(p, rect));
+            painter.add(egui::Shape::closed_line(points.to_vec(), outline));
+            painter.add(egui::Shape::closed_line(points.to_vec(), stroke));
         }
         if !self.show_labels {
             return;
@@ -197,7 +229,7 @@ impl Overlay {
         let p = if a.tool == Tool::Pointer { q } else { p };
         let galley = painter.layout(
             text,
-            egui::FontId::proportional(18.0),
+            egui::FontId::proportional(self.annotation_text_size),
             egui::Color32::WHITE,
             (rect.width() - 32.0).clamp(40.0, 420.0),
         );

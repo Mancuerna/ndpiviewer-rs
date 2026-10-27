@@ -45,7 +45,16 @@ impl Viewer {
             let mut plane = self.plane + 1;
             ui.horizontal(|ui| {
                 if ui
-                    .add_enabled(plane > 1, egui::Button::new("− [Z]"))
+                    .add_enabled(
+                        plane > 1,
+                        egui::Button::new(format!(
+                            "− [{}]",
+                            self.preferences
+                                .bindings
+                                .get(crate::keybindings::Action::PreviousZ)
+                                .label()
+                        )),
+                    )
                     .on_hover_text("Previous focus plane (Z / Page Up)")
                     .clicked()
                 {
@@ -56,7 +65,16 @@ impl Viewer {
                     egui::Slider::new(&mut plane, 1..=slide.planes).show_value(false),
                 );
                 if ui
-                    .add_enabled(plane < slide.planes, egui::Button::new("+ [X]"))
+                    .add_enabled(
+                        plane < slide.planes,
+                        egui::Button::new(format!(
+                            "+ [{}]",
+                            self.preferences
+                                .bindings
+                                .get(crate::keybindings::Action::NextZ)
+                                .label()
+                        )),
+                    )
                     .on_hover_text("Next focus plane (X / Page Down)")
                     .clicked()
                 {
@@ -147,6 +165,17 @@ impl Viewer {
                     "Draw an outline; release to close it.",
                 ),
             ] {
+                let action = match tool {
+                    Tool::Pan => crate::keybindings::Action::Pan,
+                    Tool::Line => crate::keybindings::Action::Line,
+                    Tool::Rectangle => crate::keybindings::Action::Rectangle,
+                    Tool::Pointer => crate::keybindings::Action::Pointer,
+                    Tool::Circle => crate::keybindings::Action::Circle,
+                    Tool::Polygon => crate::keybindings::Action::Polygon,
+                    Tool::Freehand => crate::keybindings::Action::Freehand,
+                };
+                let name = label.split(" [").next().unwrap_or(label);
+                let label = format!("{name} [{}]", self.preferences.bindings.get(action).label());
                 ui.selectable_value(&mut self.features.tool, tool, label)
                     .on_hover_text(hint);
             }

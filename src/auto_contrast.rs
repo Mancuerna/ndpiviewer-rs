@@ -8,6 +8,14 @@ pub(crate) fn sample(
     plane: u32,
     band: usize,
 ) -> Result<[f32; 3], String> {
+    transfer(&histogram(reader, level, plane, band)?)
+}
+pub(crate) fn histogram(
+    reader: &mut ImageReader,
+    level: &Level,
+    plane: u32,
+    band: usize,
+) -> Result<Vec<u32>, String> {
     reader.set_series(level.series).map_err(|e| e.to_string())?;
     let m = reader.metadata().clone();
     let bytes = match m.pixel_type {
@@ -55,7 +63,7 @@ pub(crate) fn sample(
             }
         }
     }
-    transfer(&histogram)
+    Ok(histogram)
 }
 
 fn transfer(histogram: &[u32]) -> Result<[f32; 3], String> {

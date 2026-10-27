@@ -76,7 +76,10 @@ impl Viewer {
         rect: egui::Rect,
         response: &egui::Response,
     ) -> bool {
-        if !self.features.edit_shape
+        if self.features.workflow.locked
+            || self.features.workflow.counting
+            || self.features.workflow.hide_marks
+            || !self.features.edit_shape
             || self.features.tool != Tool::Pan
             || !self.features.show_annotations
             || self.shown_plane != Some(self.plane)
@@ -151,7 +154,10 @@ impl Viewer {
         if self.features.export.is_some() {
             return;
         }
-        if !self.features.edit_shape
+        if self.features.workflow.locked
+            || self.features.workflow.counting
+            || self.features.workflow.hide_marks
+            || !self.features.edit_shape
             || self.features.tool != Tool::Pan
             || !self.features.show_annotations
         {

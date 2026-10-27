@@ -3,7 +3,7 @@ use super::CaptureTarget;
 use crate::Viewer;
 use eframe::egui;
 
-fn crop_view(
+pub(crate) fn crop_view(
     image: &egui::ColorImage,
     rect: egui::Rect,
     screen: egui::Rect,
@@ -68,7 +68,7 @@ fn encode_view<W: std::io::Write + std::io::Seek>(
     }
 }
 
-fn save_view(
+pub(crate) fn save_view(
     crop: &image::RgbaImage,
     path: &std::path::Path,
     format: image::ImageFormat,
@@ -79,7 +79,7 @@ fn save_view(
 }
 
 impl Viewer {
-    pub(super) fn capture_ready(&self) -> bool {
+    pub(crate) fn capture_ready(&self) -> bool {
         self.slide.is_some()
             && !self.features.info_open
             && !self.associated.open

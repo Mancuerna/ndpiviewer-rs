@@ -1,5 +1,9 @@
 use super::*;
 
+pub(crate) fn turn(v: egui::Vec2, angle: f32) -> egui::Vec2 {
+    let (sin, cos) = angle.sin_cos();
+    egui::vec2(v.x * cos - v.y * sin, v.x * sin + v.y * cos)
+}
 fn reflect(v: egui::Vec2, mirrored: [bool; 2]) -> egui::Vec2 {
     egui::vec2(
         if mirrored[0] { -v.x } else { v.x },
@@ -62,6 +66,7 @@ impl Viewer {
                 if ui.button("Reset orientation").clicked() {
                     self.features.cancel_gesture();
                     self.features.rotation = 0;
+                    self.features.angle = 0.0;
                     self.features.mirrored = [false; 2];
                     self.changed();
                 }

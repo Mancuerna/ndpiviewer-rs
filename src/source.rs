@@ -46,6 +46,25 @@ impl Source {
             Self::Stack { .. } => Err("Auto is available for NDPI fluorescence channels.".into()),
         }
     }
+    pub(crate) fn histogram(
+        &mut self,
+        index: usize,
+        plane: u32,
+        level: &Level,
+    ) -> Result<Vec<u32>, String> {
+        match self {
+            Self::Channels(channels) => {
+                let channel = channels
+                    .get_mut(index)
+                    .ok_or("Invalid acquisition channel.")?;
+                let level = channel.slide.levels.last().ok_or("No pyramid level.")?;
+                let band = channel.slide.channel_band.unwrap_or(0);
+                crate::auto_contrast::histogram(&mut channel.reader, level, plane, band)
+            }
+            Self::Ndpi(reader) => crate::auto_contrast::histogram(reader, level, plane, index),
+            Self::Stack { .. } => Err("Auto is available for NDPI fluorescence channels.".into()),
+        }
+    }
     pub(super) fn open(path: PathBuf) -> Result<(Self, Slide), String> {
         if path
             .extension()
