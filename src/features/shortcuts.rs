@@ -16,6 +16,7 @@ impl Viewer {
     pub(crate) fn handle_overview_shortcut(&mut self, ctx: &egui::Context) -> bool {
         if self.slide.is_none()
             || self.benchmark.is_some()
+            || self.chrome.settings_open
             || ctx.wants_keyboard_input()
             || ctx.memory(|m| m.any_popup_open())
         {
@@ -34,17 +35,29 @@ impl Viewer {
     }
 
     pub(crate) fn temporary_pan(&self, ctx: &egui::Context) -> bool {
-        !ctx.wants_keyboard_input()
+        !self.chrome.settings_open
+            && !ctx.wants_keyboard_input()
             && !ctx.memory(|m| m.any_popup_open())
             && ctx.input(|i| i.modifiers.is_none() && i.key_down(egui::Key::Space))
     }
 
     pub(crate) fn handle_shortcuts(&mut self, ctx: &egui::Context) {
         if self.benchmark.is_some()
+            || self.chrome.settings_open
             || ctx.wants_keyboard_input()
             || ctx.memory(|m| m.any_popup_open())
-            || self.slide.is_none()
         {
+            return;
+        }
+        if consume(ctx, egui::Modifiers::NONE, egui::Key::V) {
+            self.toggle_sidebar();
+            return;
+        }
+        if consume(ctx, egui::Modifiers::NONE, egui::Key::G) {
+            self.preferences.show_minimap = !self.preferences.show_minimap;
+            return;
+        }
+        if self.slide.is_none() {
             return;
         }
         let undo = consume(ctx, egui::Modifiers::CTRL, egui::Key::Z);
@@ -162,13 +175,13 @@ impl Viewer {
                 self.plane = (self.plane + 1).min(self.slide.as_ref().unwrap().planes - 1);
                 self.changed();
             }
-            let step_size = self.preferences.arrow_step;
+            let step_size = self.viewport_size * (self.preferences.arrow_percent / 100.0);
             let mut delta = egui::Vec2::ZERO;
             for (key, step) in [
-                (egui::Key::ArrowLeft, egui::vec2(-step_size, 0.0)),
-                (egui::Key::ArrowRight, egui::vec2(step_size, 0.0)),
-                (egui::Key::ArrowUp, egui::vec2(0.0, -step_size)),
-                (egui::Key::ArrowDown, egui::vec2(0.0, step_size)),
+                (egui::Key::ArrowLeft, egui::vec2(-step_size.x, 0.0)),
+                (egui::Key::ArrowRight, egui::vec2(step_size.x, 0.0)),
+                (egui::Key::ArrowUp, egui::vec2(0.0, -step_size.y)),
+                (egui::Key::ArrowDown, egui::vec2(0.0, step_size.y)),
             ] {
                 if i.key_pressed(key) {
                     delta += step;
@@ -209,10 +222,44 @@ mod tests {
     }
 
     #[test]
+    fn visibility_shortcuts_toggle_and_respect_modifiers_and_settings() {
+        let (mut viewer, _) = crate::tests::tile_viewer();
+        let ctx = egui::Context::default();
+        assert!(!viewer.sidebar_shown());
+        frame(&mut viewer, &ctx, egui::Key::V, egui::Modifiers::NONE);
+        assert!(viewer.sidebar_shown());
+        frame(&mut viewer, &ctx, egui::Key::V, egui::Modifiers::NONE);
+        assert!(!viewer.sidebar_shown());
+        viewer.preferences.auto_hide_sidebar = false;
+        assert!(!viewer.sidebar_shown(), "Explicit hide overrides pinning");
+        frame(&mut viewer, &ctx, egui::Key::G, egui::Modifiers::NONE);
+        assert!(!viewer.preferences.show_minimap);
+        assert!(viewer.navigator_rect(egui::Rect::EVERYTHING).is_none());
+        let expected = viewer.preferences;
+        for key in [egui::Key::V, egui::Key::G] {
+            frame(&mut viewer, &ctx, key, egui::Modifiers::CTRL);
+            assert_eq!(viewer.preferences, expected);
+            viewer.chrome.settings_open = true;
+            frame(&mut viewer, &ctx, key, egui::Modifiers::NONE);
+            assert_eq!(viewer.preferences, expected);
+            viewer.chrome.settings_open = false;
+            ctx.memory_mut(|m| m.open_popup(egui::Id::new("visibility-popup")));
+            frame(&mut viewer, &ctx, key, egui::Modifiers::NONE);
+            assert_eq!(viewer.preferences, expected);
+            ctx.memory_mut(|m| m.close_popup());
+        }
+        viewer.open("another.ndpi".into());
+        assert_eq!(viewer.preferences, expected);
+        frame(&mut viewer, &ctx, egui::Key::G, egui::Modifiers::NONE);
+        assert!(viewer.preferences.show_minimap);
+    }
+
+    #[test]
     fn configured_arrow_step_follows_zoom_and_orientation_and_survives_open() {
         let (mut viewer, _) = crate::tests::tile_viewer();
         let ctx = egui::Context::default();
-        viewer.preferences.arrow_step = 350.0;
+        viewer.preferences.arrow_percent = 35.0;
+        viewer.viewport_size = egui::vec2(1000.0, 600.0);
         viewer.preferences.map_height = 275.0;
         viewer.zoom = 0.5;
         viewer.features.rotation = 1;
@@ -225,8 +272,27 @@ mod tests {
             egui::Modifiers::NONE,
         );
         assert_eq!(viewer.center - before, expected);
+        let before = viewer.center;
+        let expected = viewer.inverse_transform(egui::vec2(0.0, 210.0)) / viewer.zoom;
+        frame(
+            &mut viewer,
+            &ctx,
+            egui::Key::ArrowDown,
+            egui::Modifiers::NONE,
+        );
+        assert_eq!(viewer.center - before, expected);
+        viewer.viewport_size.x = 500.0;
+        let before = viewer.center;
+        let expected = viewer.inverse_transform(egui::vec2(175.0, 0.0)) / viewer.zoom;
+        frame(
+            &mut viewer,
+            &ctx,
+            egui::Key::ArrowRight,
+            egui::Modifiers::NONE,
+        );
+        assert_eq!(viewer.center - before, expected);
         viewer.open("another.ndpi".into());
-        assert_eq!(viewer.preferences.arrow_step, 350.0);
+        assert_eq!(viewer.preferences.arrow_percent, 35.0);
         assert_eq!(viewer.preferences.map_height, 275.0);
     }
     #[test]
@@ -322,13 +388,16 @@ mod tests {
             egui::Key::Z,
             egui::Key::Tab,
             egui::Key::Space,
+            egui::Key::V,
+            egui::Key::G,
         ] {
+            let old_preferences = viewer.preferences;
             let old_zoom = viewer.zoom;
             let old_plane = viewer.plane;
             let _ = ctx.run(
                 egui::RawInput {
                     events: vec![
-                        egui::Event::Text("s12345zx ".into()),
+                        egui::Event::Text("s12345zxvg ".into()),
                         egui::Event::Key {
                             key,
                             physical_key: None,
@@ -349,10 +418,11 @@ mod tests {
                 },
             );
             assert!(viewer.features.tool == Tool::Pan);
+            assert_eq!(viewer.preferences, old_preferences);
             assert_eq!(viewer.zoom, old_zoom);
             assert_eq!(viewer.plane, old_plane);
         }
-        assert!(text.contains("s12345zx"));
+        assert!(text.contains("s12345zxvg"));
         ctx.memory_mut(|m| {
             m.surrender_focus(id);
             m.open_popup(egui::Id::new("test-popup"));

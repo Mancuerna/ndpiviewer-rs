@@ -129,6 +129,9 @@ impl eframe::App for Comparison {
 
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
         let preferences_before = self.viewers[self.active].preferences;
+        ctx.set_zoom_factor(preferences_before.ui_scale);
+        self.library
+            .set_label_mode(preferences_before.label_thumbnails);
         let previous_active = self.active;
         for viewer in &mut self.viewers {
             viewer.poll(ctx);
@@ -242,6 +245,7 @@ impl eframe::App for Comparison {
                             ui.colored_label(egui::Color32::LIGHT_RED, error);
                         }
                     });
+                    ui.menu_button("View", |ui| {
                     if ui.checkbox(&mut fullscreen, "Full screen").on_hover_text("F11 to toggle; Escape to leave full screen.").changed() {
                         ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(fullscreen));
                     }
@@ -253,6 +257,8 @@ impl eframe::App for Comparison {
                             self.active = 1;
                         }
                     }
+                    });
+                    self.viewers[self.active].toolbar(ui);
                     if self.split {
                         ui.selectable_value(&mut self.active, 0, "Left image");
                         ui.selectable_value(&mut self.active, 1, "Right image");
@@ -260,11 +266,7 @@ impl eframe::App for Comparison {
                             .on_hover_text("Align each image with sync off, then enable it. Relative zoom and screen movement are linked; Z, rotation and channels remain independent.");
                         ui.strong(if self.active == 0 { "Controls: LEFT image" } else { "Controls: RIGHT image" });
                     }
-                    ui.small(format!(
-                        "Total tile cache: {:.1} / {} MiB",
-                        self.viewers.iter().map(Viewer::cache_bytes).sum::<usize>() as f64 / 1048576.0,
-                        self.total_budget / 1048576,
-                    ));
+
                 });
             });
             egui::TopBottomPanel::top("slide-tabs").show(ctx, |ui| {

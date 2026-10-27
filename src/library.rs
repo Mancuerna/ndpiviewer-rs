@@ -33,10 +33,11 @@ pub(crate) fn thumbnail(path: PathBuf) -> Result<egui::ColorImage, String> {
 }
 
 type Scan = Result<(PathBuf, Vec<PathBuf>), String>;
-type Thumbnail = (PathBuf, Result<egui::ColorImage, String>);
+type Thumbnail = (PathBuf, bool, Result<egui::ColorImage, String>);
 #[derive(Default)]
 pub(crate) struct Library {
     pub open: bool,
+    label_mode: bool,
     selected: Option<PathBuf>,
     scroll_to_selection: bool,
     folder: Option<PathBuf>,
@@ -50,6 +51,13 @@ pub(crate) struct Library {
 }
 
 impl Library {
+    pub fn set_label_mode(&mut self, enabled: bool) {
+        if self.label_mode != enabled {
+            self.label_mode = enabled;
+            self.cache.clear();
+        }
+    }
+
     /// Tab cycles matching slides in this library; text fields retain normal Tab behavior.
     pub fn cycle_shortcut(
         &mut self,
@@ -189,11 +197,11 @@ impl Library {
             }
         }
         for index in (0..self.thumbnails.len()).rev() {
-            let Some((path, result)) = self.thumbnails[index].1.take() else {
+            let Some((path, label_mode, result)) = self.thumbnails[index].1.take() else {
                 continue;
             };
             self.thumbnails.swap_remove(index);
-            if self.paths.contains(&path) {
+            if label_mode == self.label_mode && self.paths.contains(&path) {
                 let texture = result.map(|image| {
                     ctx.load_texture(
                         path.display().to_string(),
@@ -215,6 +223,7 @@ impl Library {
         let mut selected = None;
         let mut next_thumbnails = Vec::new();
         egui::Window::new("Slide library")
+            .max_height((ctx.screen_rect().height() - 100.0).max(160.0))
             .open(&mut open)
             .default_size([660.0, 620.0])
             .show(ctx, |ui| {
@@ -256,6 +265,7 @@ impl Library {
                 ui.add(
                     egui::TextEdit::singleline(&mut self.filter).id(egui::Id::new("library-filter")).hint_text("Filter by filename"),
                 );
+                ui.small(if self.label_mode { "Previews: glass slide / label (slide image when unavailable)" } else { "Previews: slide image" });
                 ui.small("Tab / Shift+Tab: next / previous slide in this library. Thumbnails load as you browse.");
                 if self.scan.is_some() {
                     ui.label("Reading folder…");
@@ -375,11 +385,19 @@ impl Library {
                 .into_iter()
                 .take(2_usize.saturating_sub(self.thumbnails.len()))
             {
+                let label_mode = self.label_mode;
                 self.thumbnails.push((
                     path.clone(),
                     Task::spawn(ctx, move || {
-                        let image = thumbnail(path.clone());
-                        (path, image)
+                        let image = if label_mode {
+                            match crate::associated::label_thumbnail(path.clone()) {
+                                Ok(Some(image)) => Ok(image),
+                                _ => thumbnail(path.clone()),
+                            }
+                        } else {
+                            thumbnail(path.clone())
+                        };
+                        (path, label_mode, image)
                     }),
                 ));
             }
@@ -405,6 +423,36 @@ fn cycle_path(paths: &[PathBuf], current: Option<&Path>, backward: bool) -> Opti
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn changing_thumbnail_mode_discards_old_results_without_spawning_more_workers() {
+        let ctx = egui::Context::default();
+        let path = PathBuf::from("public.ndpi");
+        let mut library = Library {
+            paths: vec![path.clone()],
+            ..Default::default()
+        };
+        let result_path = path.clone();
+        library.thumbnails.push((
+            path,
+            Task::spawn(&ctx, move || {
+                (
+                    result_path,
+                    false,
+                    Ok(egui::ColorImage::new([1, 1], egui::Color32::WHITE)),
+                )
+            }),
+        ));
+        library.set_label_mode(true);
+        assert_eq!(library.thumbnails.len(), 1);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        while !library.thumbnails.is_empty() {
+            library.show(&ctx);
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+        assert!(library.cache.is_empty());
+    }
+
     #[test]
     fn following_slides_scans_the_folder_and_keeps_latest_request() {
         let ctx = egui::Context::default();

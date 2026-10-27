@@ -14,6 +14,15 @@ pub(crate) fn load(path: PathBuf) -> Result<Vec<(String, egui::ColorImage)>, Str
 }
 
 fn load_images(path: PathBuf) -> Result<Images, String> {
+    load_images_with_options(path, false)
+}
+
+pub(crate) fn label_thumbnail(path: PathBuf) -> Result<Option<egui::ColorImage>, String> {
+    load_images_with_options(path, true)
+        .map(|images| images.images.into_iter().next().map(|(_, image)| image))
+}
+
+fn load_images_with_options(path: PathBuf, label_only: bool) -> Result<Images, String> {
     if path.is_dir() {
         return Err("Image folders do not contain embedded slide images.".into());
     }
@@ -43,7 +52,7 @@ fn load_images(path: PathBuf) -> Result<Images, String> {
     let mut images = Vec::new();
     let mut warnings = Vec::new();
     for series in 0..decoder.series_count() {
-        if images.len() >= 8 {
+        if images.len() >= if label_only { 1 } else { 8 } {
             break;
         }
         decoder.set_series(series).map_err(|e| e.to_string())?;
@@ -70,12 +79,21 @@ fn load_images(path: PathBuf) -> Result<Images, String> {
         {
             continue;
         }
+        let kind = m
+            .series_metadata
+            .get("ndpi.image_type")
+            .map(|v| v.to_string().to_ascii_lowercase())
+            .unwrap_or_default();
+        if label_only && lens != Some(-1.0) && !kind.contains("label") && !kind.contains("macro") {
+            continue;
+        }
         let title = match lens {
             Some(-1.0) => "Glass slide / label (as captured)".to_string(),
             Some(-2.0) => "Acquisition map / mask".to_string(),
             _ => format!("Associated image {}", series + 1),
         };
-        let factor = (1024.0 / m.size_x.max(m.size_y) as f64).min(1.0);
+        let limit = if label_only { 192.0 } else { 1024.0 };
+        let factor = (limit / m.size_x.max(m.size_y) as f64).min(1.0);
         let region = Region {
             sampling: 1,
             preview: true,
@@ -201,6 +219,9 @@ mod tests {
     fn cytology_keeps_label_and_single_channel_mask() {
         let path =
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("example_images/02B0669241M.ndpi");
+        let thumb = label_thumbnail(path.clone()).unwrap().unwrap();
+        assert!(thumb.size.iter().all(|&n| n <= 192));
+        assert!(thumb.pixels.iter().any(|p| p.r() > 100 && p.g() > 100));
         let result = load_images(path).unwrap();
         assert!(result.warnings.is_empty(), "{:?}", result.warnings);
         assert_eq!(result.images.len(), 2);

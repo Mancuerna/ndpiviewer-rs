@@ -33,60 +33,62 @@ impl Viewer {
         )
         .on_hover_text(slide.path.display().to_string());
         ui.separator();
-        ui.horizontal(|ui| {
-            ui.strong("Focus Z");
-            ui.label(format!("{} / {}", self.plane + 1, slide.planes));
-            if let Some(z) = slide.focus_microns(self.plane) {
-                ui.label(format!("{z:+.3} µm"))
-                    .on_hover_text("Scanner focus coordinate, not tissue depth.");
-            }
-        });
-        let mut plane = self.plane + 1;
-        ui.horizontal(|ui| {
-            if ui
-                .add_enabled(plane > 1, egui::Button::new("− [Z]"))
-                .on_hover_text("Previous focus plane (Z / Page Up)")
-                .clicked()
-            {
-                plane -= 1;
-            }
-            ui.add_enabled(
-                slide.planes > 1,
-                egui::Slider::new(&mut plane, 1..=slide.planes).show_value(false),
-            );
-            if ui
-                .add_enabled(plane < slide.planes, egui::Button::new("+ [X]"))
-                .on_hover_text("Next focus plane (X / Page Down)")
-                .clicked()
-            {
-                plane += 1;
-            }
-            if let Some(reference) = slide.reference_plane() {
+        if slide.planes > 1 {
+            ui.horizontal(|ui| {
+                ui.strong("Focus Z");
+                ui.label(format!("{} / {}", self.plane + 1, slide.planes));
+                if let Some(z) = slide.focus_microns(self.plane) {
+                    ui.label(format!("{z:+.3} µm"))
+                        .on_hover_text("Scanner focus coordinate, not tissue depth.");
+                }
+            });
+            let mut plane = self.plane + 1;
+            ui.horizontal(|ui| {
                 if ui
-                    .small_button("Ref")
-                    .on_hover_text("Go to the recorded plane closest to zero.")
+                    .add_enabled(plane > 1, egui::Button::new("− [Z]"))
+                    .on_hover_text("Previous focus plane (Z / Page Up)")
                     .clicked()
                 {
-                    plane = reference + 1;
+                    plane -= 1;
                 }
+                ui.add_enabled(
+                    slide.planes > 1,
+                    egui::Slider::new(&mut plane, 1..=slide.planes).show_value(false),
+                );
+                if ui
+                    .add_enabled(plane < slide.planes, egui::Button::new("+ [X]"))
+                    .on_hover_text("Next focus plane (X / Page Down)")
+                    .clicked()
+                {
+                    plane += 1;
+                }
+                if let Some(reference) = slide.reference_plane() {
+                    if ui
+                        .small_button("Ref")
+                        .on_hover_text("Go to the recorded plane closest to zero.")
+                        .clicked()
+                    {
+                        plane = reference + 1;
+                    }
+                }
+            });
+            if self.plane != plane - 1 {
+                self.features.cancel_gesture();
+                self.plane = plane - 1;
+                self.changed();
             }
-        });
-        if self.plane != plane - 1 {
-            self.features.cancel_gesture();
-            self.plane = plane - 1;
-            self.changed();
+            if self.shown_plane.is_some_and(|shown| shown != self.plane) {
+                ui.colored_label(
+                    egui::Color32::YELLOW,
+                    format!(
+                        "Loading Z {} · showing Z {}",
+                        self.plane + 1,
+                        self.shown_plane.unwrap() + 1
+                    ),
+                );
+            }
+            ui.separator();
         }
-        if self.shown_plane.is_some_and(|shown| shown != self.plane) {
-            ui.colored_label(
-                egui::Color32::YELLOW,
-                format!(
-                    "Loading Z {} · showing Z {}",
-                    self.plane + 1,
-                    self.shown_plane.unwrap() + 1
-                ),
-            );
-        }
-        ui.separator();
         ui.horizontal(|ui| {
             ui.strong("Tools");
             if ui

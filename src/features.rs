@@ -55,6 +55,7 @@ pub(super) struct Features {
     status: Option<String>,
     canvas: Option<egui::Rect>,
     export: Option<(CaptureTarget, egui::Rect)>,
+    capture_queued: bool,
 }
 
 impl Default for Features {
@@ -90,6 +91,7 @@ impl Default for Features {
             status: None,
             canvas: None,
             export: None,
+            capture_queued: false,
         }
     }
 }
