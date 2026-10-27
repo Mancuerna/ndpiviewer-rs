@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.0](https://github.com/Mancuerna/ndpiviewer-rs/compare/v0.6.0...v0.7.0) (2026-10-27)
+
+
+### Features
+
+* add compact controls, label previews and adjacent tile prefetch ([#16](https://github.com/Mancuerna/ndpiviewer-rs/issues/16)) ([795aa8c](https://github.com/Mancuerna/ndpiviewer-rs/commit/795aa8c1c3b36928f9ed157896566f20928e6b1f))
+
 ## [0.6.0](https://github.com/Mancuerna/ndpiviewer-rs/compare/v0.5.0...v0.6.0) (2026-10-26)
 
 
