@@ -100,11 +100,20 @@ impl Viewer {
         }
         if let Some(rect) = self.features.canvas {
             self.features.export = Some((target, rect));
-            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
+            self.features.capture_queued = true;
+            ctx.request_repaint();
         }
     }
 
+    pub(crate) fn capture_pending(&self) -> bool {
+        self.features.export.is_some()
+    }
+
     pub(crate) fn handle_export(&mut self, ctx: &egui::Context) {
+        // Defer one frame so the overlay inspector is absent from the screenshot.
+        if std::mem::take(&mut self.features.capture_queued) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(Default::default()));
+        }
         // Screenshot exports are viewport snapshots, not full-resolution crops.
         let screenshot = ctx.input(|i| {
             i.events.iter().find_map(|e| match e {

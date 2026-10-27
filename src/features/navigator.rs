@@ -26,6 +26,9 @@ impl Viewer {
     }
 
     pub(crate) fn navigator_rect(&self, canvas: egui::Rect) -> Option<egui::Rect> {
+        if !self.preferences.show_minimap {
+            return None;
+        }
         self.slide.as_ref()?;
         let height = self.preferences.map_height.min(canvas.height() * 0.35);
         let width = (height * 1.4).min(canvas.width() * 0.4);

@@ -29,6 +29,7 @@ mod benchmark;
 mod calibration;
 mod channel_settings;
 mod channels;
+mod chrome;
 mod comparison;
 mod display;
 mod export_file;
@@ -67,6 +68,7 @@ struct CachedRegion {
 
 struct Viewer {
     preferences: settings::Preferences,
+    chrome: chrome::Chrome,
     region_export: region_export::Export,
     associated: associated::Associated,
     pending_close: bool,
@@ -116,6 +118,7 @@ impl Viewer {
         cc.egui_ctx.set_style(style);
         let (tx, rx) = worker::spawn(&cc.egui_ctx);
         Self {
+            chrome: chrome::Chrome::default(),
             preferences: settings::Preferences::path()
                 .map(|p| settings::Preferences::load(&p))
                 .unwrap_or_default(),
@@ -288,155 +291,25 @@ impl Viewer {
         self.features.save_tracking();
         self.save_channel_settings();
     }
-    fn controls(&mut self, ctx: &egui::Context, total_budget: &mut usize) {
-        egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
-            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Extend);
-            ui.horizontal_wrapped(|ui| {
-                ui.heading("NDPI Viewer");
-                ui.separator();
-                if ui.button("Open slide…").clicked() {
-                    self.choose_slide();
-                }
-                if ui.button("Open Z stack…").clicked() {
-                    if let Some(path) = rfd::FileDialog::new().pick_folder() {
-                        self.open(path);
-                    }
-                }
-                if ui
-                    .add_enabled(self.slide.is_some(), egui::Button::new("Fit slide"))
-                    .clicked()
-                {
-                    self.fit = true;
-                }
-                ui.menu_button("Navigation…", |ui| {
-                    ui.label("Arrow-key movement (screen pixels per press)");
-                    ui.add(
-                        egui::Slider::new(&mut self.preferences.arrow_step, 10.0..=1000.0)
-                            .text("Step"),
-                    );
-                    ui.small(
-                        "Saved for all slides. Movement follows the current view orientation.",
-                    );
-                });
-                let previous_budget = *total_budget;
-                egui::ComboBox::from_id_salt("cache-budget")
-                    .selected_text(format!("Cache: {} MiB", *total_budget / 1048576))
-                    .show_ui(ui, |ui| {
-                        for mib in [96, 256, 512] {
-                            ui.selectable_value(total_budget, mib * 1048576, format!("{mib} MiB"));
-                        }
-                    });
-                if *total_budget != previous_budget && self.benchmark.is_none() {
-                    if let Some(path) = settings::path() {
-                        if let Err(error) = settings::save(&path, *total_budget) {
-                            diagnostics::record(diagnostics::Event::SettingsSaveFailed);
-                            self.status = format!("Could not save cache setting: {error}");
-                        }
-                    }
-                }
-                ui.label(if self.zoom < 0.01 {
-                    format!("Zoom {:.2}%", self.zoom * 100.0)
-                } else {
-                    format!("Zoom {:.0}%", self.zoom * 100.0)
-                });
-                if self.busy {
-                    ui.spinner();
-                }
-            });
-            ui.horizontal_wrapped(|ui| {
-                self.navigation_buttons(ui);
-                self.orientation_menu(ui);
-                self.magnification_menu(ui);
-                if ui
-                    .add_enabled(
-                        self.slide.is_some(),
-                        egui::Button::new("Glass slide / label"),
-                    )
-                    .clicked()
-                {
-                    self.associated.open = true;
-                }
-                if ui
-                    .add_enabled(self.slide.is_some(), egui::Button::new("Slide info"))
-                    .clicked()
-                {
-                    self.features.info_open = true;
-                }
-            });
-        });
-        egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                if self.busy {
-                    ui.spinner();
-                }
-                if self.channels.auto_pending.is_some() || self.channels.auto_running.is_some() {
-                    ui.label("Analyzing channel samples…");
-                } else if self.channels.dirty_at.is_some() || self.channels.fallback.is_some() {
-                    ui.label("Updating channel display…");
-                } else if self.slide.is_some()
-                    && !self.channels.settings.iter().any(|channel| channel.enabled)
-                {
-                    ui.label(
-                        "All channels are hidden. Use Channels > Show all to restore the image.",
-                    );
-                } else if self.status.contains(" region · ") {
-                    ui.label(if self.busy {
-                        "Loading image detail…"
-                    } else {
-                        "Ready"
-                    });
-                } else {
-                    ui.label(&self.status);
-                }
-                ui.separator();
-                ui.menu_button("Performance", |ui| {
-                    ui.label(format!("OpenGL · {}", self.renderer));
-                    ui.label(format!(
-                        "Active cache: {:.1} / {} MiB · {} tiles",
-                        self.cache_bytes() as f64 / 1048576.0,
-                        self.cache_budget / 1048576,
-                        self.cache.len()
-                    ));
-                    ui.label(&self.status);
-                });
-                ui.menu_button("Help", |ui| {
-                    ui.label(concat!("NDPI Viewer ", env!("CARGO_PKG_VERSION")));
-                    ui.label(if diagnostics::available() { "Local error logging is enabled." } else { "Local error logging is unavailable." });
-                    ui.label("Logs contain event codes only, never image names, paths or annotations. Nothing is uploaded.");
-                    if ui.button("Open error logs folder").clicked() {
-                        if let Some(path) = diagnostics::directory() {
-                            if let Err(error) = std::process::Command::new("explorer.exe").arg(path).spawn() {
-                                self.status = format!("Could not open log folder: {error}");
-                            }
-                        }
-                    }
-                    ui.separator();
-                    ui.label("Scroll: zoom · Drag: pan · F: fit · Escape: Pan / select");
-                    ui.label("Page Up / Down or Ctrl+wheel: focus Z");
-                    ui.label("Ctrl+Z / Ctrl+Y: undo / redo annotations");
-                    ui.label("Tab: overview / return · F11: full screen");
-                    ui.label("Right-drag: zoom to region · B: scale bar");
-                });
-            });
-        });
-        egui::SidePanel::left("slide-info")
-            .default_width(350.0)
-            .min_width(320.0)
-            .show(ctx, |ui| {
-                self.inspector_panel(ui);
-            });
-    }
-
     fn canvas(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         let size = ui.available_size();
         let canvas = egui::Rect::from_min_size(ui.cursor().min, size);
-        let over_navigator = self.navigator_rect(canvas).is_some_and(|map| {
-            ctx.input(|i| {
-                i.pointer.hover_pos().is_some_and(|p| map.contains(p))
-                    || i.pointer.press_origin().is_some_and(|p| map.contains(p))
-            })
-        });
+        let over_sidebar = ctx
+            .data(|d| d.get_temp::<egui::Rect>(egui::Id::new("inspector-overlay-rect")))
+            .is_some_and(|panel| {
+                ctx.input(|i| {
+                    i.pointer.hover_pos().is_some_and(|p| panel.contains(p))
+                        || i.pointer.press_origin().is_some_and(|p| panel.contains(p))
+                })
+            });
+        let over_navigator = over_sidebar
+            || self.navigator_rect(canvas).is_some_and(|map| {
+                ctx.input(|i| {
+                    i.pointer.hover_pos().is_some_and(|p| map.contains(p))
+                        || i.pointer.press_origin().is_some_and(|p| map.contains(p))
+                })
+            });
         let (rect, response) = ui.allocate_exact_size(
             size,
             if over_navigator {
@@ -628,6 +501,7 @@ mod tests {
         let (reply_tx, rx) = mpsc::channel();
         (
             Viewer {
+                chrome: chrome::Chrome::default(),
                 preferences: settings::Preferences::default(),
                 region_export: Default::default(),
                 associated: Default::default(),
@@ -807,7 +681,7 @@ mod tests {
                 replies.send(Reply::Pixels(0, region, Ok(result))).unwrap();
                 viewer.poll(&ctx);
                 reads += 1;
-                assert!(reads <= MAX_VISIBLE_TILES + 1, "Scheduler must converge");
+                assert!(reads <= MAX_VISIBLE_TILES + 17, "Scheduler must converge");
             }
             eprintln!(
                 "zoom={zoom} reads={reads} cache_mib={:.1}",
@@ -847,6 +721,7 @@ mod tests {
                 .collect(),
         };
         let mut viewer = Viewer {
+            chrome: chrome::Chrome::default(),
             preferences: settings::Preferences::default(),
             region_export: Default::default(),
             associated: Default::default(),

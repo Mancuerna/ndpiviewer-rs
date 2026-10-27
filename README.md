@@ -13,7 +13,7 @@ Built with Rust and egui. Local files, no account, no cloud uploads.
 
 ## Made for exploring slides
 
-- **Navigate comfortably:** tiled zoom and pan, Z-plane controls, an always-visible minimap and visited-area tracking.
+- **Navigate comfortably:** tiled zoom and pan, Z-plane controls, a corner minimap and visited-area tracking.
 - **Compare side by side:** synchronized zoom and pan, with independent channel settings.
 - **Tune fluorescence:** channel visibility, pseudocolors, brightness, contrast, gamma and automatic contrast.
 - **Measure and annotate:** calibrated lengths and areas, editable NDPA annotations and undo/redo.
@@ -30,6 +30,8 @@ currently **unsigned**, so Windows may show a SmartScreen warning.
 
 Open an `.ndpi` slide or an `.ndpis` fluorescence set. Keep all files referenced by
 an NDPIS set together. Scroll to zoom, drag to pan and use **Focus Z** to change planes.
+Press **V** for the sidebar and **G** for the minimap. **Settings** offers interface scaling,
+label thumbnails and arrow-key movement as a percentage of the visible field.
 Annotations and per-image preferences are saved beside your images when writable.
 **Help > Open error logs folder** opens local diagnostics; logs omit image names,
 paths and annotation text and are never uploaded.

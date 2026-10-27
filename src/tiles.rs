@@ -27,6 +27,7 @@ impl Viewer {
             }
             // Keep the current overview when possible, but never exceed the cap.
             let overview = self.overview(self.plane);
+            let visible = self.visible_tiles(self.viewport_size);
             let eligible = |e: &CachedRegion| {
                 overfull.is_none_or(|(s, z)| e.region.series == s && e.region.plane == z)
             };
@@ -34,7 +35,9 @@ impl Viewer {
                 .cache
                 .iter()
                 .position(|e| {
-                    eligible(e) && !overview.as_ref().is_some_and(|r| same_region(r, &e.region))
+                    eligible(e)
+                        && !overview.as_ref().is_some_and(|r| same_region(r, &e.region))
+                        && !visible.iter().any(|r| same_region(r, &e.region))
                 })
                 .or_else(|| self.cache.iter().position(eligible))
                 .unwrap_or(0);
@@ -134,12 +137,99 @@ impl Viewer {
         }
     }
 
+    /// A bounded ring on the same source/sampling grid as the visible field.
+    /// Budget the whole working set, including the overview, to avoid eviction loops.
+    fn adjacent_tiles(&self, wanted: &[Region]) -> Vec<Region> {
+        if !self.preferences.prefetch_neighbors {
+            return vec![];
+        }
+        let Some(first) = wanted.first() else {
+            return vec![];
+        };
+        let Some(slide) = &self.slide else {
+            return vec![];
+        };
+        let Some(level) = slide.levels.iter().find(|l| l.series == first.series) else {
+            return vec![];
+        };
+        let span = TILE_SIZE * first.sampling;
+        let sx = level.width as f32 / slide.width as f32;
+        let sy = level.height as f32 / slide.height as f32;
+        let bytes = |r: &Region| r.w as usize * r.h as usize * 4;
+        let used = wanted.iter().map(bytes).sum::<usize>()
+            + self.overview(self.plane).as_ref().map_or(0, bytes);
+        let mut remaining = (self.cache_budget / 2)
+            .saturating_sub(used)
+            .min(self.cache_budget / 4);
+        let x0 = wanted
+            .iter()
+            .map(|r| r.x / span)
+            .min()
+            .unwrap()
+            .saturating_sub(1);
+        let y0 = wanted
+            .iter()
+            .map(|r| r.y / span)
+            .min()
+            .unwrap()
+            .saturating_sub(1);
+        let x1 =
+            (wanted.iter().map(|r| r.x / span).max().unwrap() + 2).min(level.width.div_ceil(span));
+        let y1 =
+            (wanted.iter().map(|r| r.y / span).max().unwrap() + 2).min(level.height.div_ceil(span));
+        let mut neighbors = Vec::new();
+        for ty in y0..y1 {
+            for tx in x0..x1 {
+                let x = tx * span;
+                let y = ty * span;
+                if wanted.iter().any(|r| r.x == x && r.y == y) {
+                    continue;
+                }
+                let width = span.min(level.width - x);
+                let height = span.min(level.height - y);
+                neighbors.push(Region {
+                    x,
+                    y,
+                    w: width.div_ceil(first.sampling),
+                    h: height.div_ceil(first.sampling),
+                    world: [
+                        x as f32 / sx,
+                        y as f32 / sy,
+                        width as f32 / sx,
+                        height as f32 / sy,
+                    ],
+                    ..first.clone()
+                });
+            }
+        }
+        neighbors.sort_by(|a, b| {
+            let distance = |r: &Region| {
+                (egui::vec2(r.world[0] + r.world[2] / 2.0, r.world[1] + r.world[3] / 2.0)
+                    - self.center)
+                    .length_sq()
+            };
+            distance(a).total_cmp(&distance(b))
+        });
+        neighbors.truncate(16);
+        neighbors.retain(|r| {
+            let cost = bytes(r);
+            if cost > remaining {
+                false
+            } else {
+                remaining -= cost;
+                true
+            }
+        });
+        neighbors
+    }
+
     pub(super) fn next_tile(&self, wanted: &[Region]) -> Option<Region> {
         let missing =
             |r: &Region| !self.cached(r) && !self.failed.iter().any(|f| same_region(f, r));
         self.overview(self.plane)
             .filter(missing)
             .or_else(|| wanted.iter().find(|r| missing(r)).cloned())
+            .or_else(|| self.adjacent_tiles(wanted).into_iter().find(missing))
             .or_else(|| {
                 // Prefetch only small overviews after foreground tiles finish.
                 let slide = self.slide.as_ref()?;
@@ -209,6 +299,59 @@ impl Viewer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn neighbor_prefetch_is_bounded_converges_and_preserves_foreground() {
+        for mib in [48, 96, 256, 512] {
+            let (mut viewer, _) = crate::tests::tile_viewer();
+            viewer.cache_budget = mib * 1048576;
+            viewer.slide.as_mut().unwrap().planes = 5;
+            viewer.viewport_size = egui::vec2(1600.0, 900.0);
+            viewer.zoom = 0.5;
+            let ctx = egui::Context::default();
+            let texture = ctx.load_texture(
+                "tile",
+                egui::ColorImage::new([1, 1], egui::Color32::WHITE),
+                egui::TextureOptions::LINEAR,
+            );
+            for step in 0..5 {
+                viewer.center.x += 200.0 * step as f32;
+                let wanted = viewer.visible_tiles(viewer.viewport_size);
+                let neighbors = viewer.adjacent_tiles(&wanted);
+                assert!(!neighbors.is_empty());
+                for r in &neighbors {
+                    assert!(!wanted.iter().any(|w| same_region(w, r)));
+                    assert_eq!(r.sampling, wanted[0].sampling);
+                    assert_eq!(r.plane, viewer.plane);
+                    assert!(r.x < viewer.slide.as_ref().unwrap().levels[r.series].width);
+                }
+                let mut reads = 0;
+                while let Some(region) = viewer.next_tile(&wanted) {
+                    // Foreground always wins over speculative work.
+                    if wanted.iter().any(|r| !viewer.cached(r)) {
+                        assert!(
+                            same_region(&region, &viewer.overview(viewer.plane).unwrap())
+                                || wanted.iter().any(|r| same_region(r, &region))
+                        );
+                    }
+                    viewer.cache.push(CachedRegion {
+                        region,
+                        texture: texture.clone(),
+                    });
+                    viewer.trim_cache();
+                    reads += 1;
+                    assert!(reads < 100, "Prefetch must not churn at {mib} MiB");
+                }
+                assert!(wanted.iter().all(|r| viewer.cached(r)));
+                assert!(neighbors.iter().all(|r| viewer.cached(r)));
+                assert!(viewer.cache_bytes() <= viewer.cache_budget);
+            }
+            viewer.preferences.prefetch_neighbors = false;
+            assert!(viewer
+                .adjacent_tiles(&viewer.visible_tiles(viewer.viewport_size))
+                .is_empty());
+        }
+    }
+
     #[test]
     fn sparse_pyramid_keeps_screen_detail_and_bounds_tile_memory() {
         let (mut viewer, _) = crate::tests::tile_viewer();
