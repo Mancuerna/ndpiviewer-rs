@@ -1,4 +1,5 @@
 use super::*;
+use crate::keybindings::Action;
 
 fn consume(ctx: &egui::Context, modifiers: egui::Modifiers, key: egui::Key) -> bool {
     ctx.input_mut(|i| {
@@ -12,6 +13,10 @@ fn consume(ctx: &egui::Context, modifiers: egui::Modifiers, key: egui::Key) -> b
 }
 
 impl Viewer {
+    fn action(&self, ctx: &egui::Context, action: Action) -> bool {
+        self.preferences.bindings.get(action).consume(ctx)
+    }
+
     // Run before toolbar widgets so Tab cannot give them focus first.
     pub(crate) fn handle_overview_shortcut(&mut self, ctx: &egui::Context) -> bool {
         if self.slide.is_none()
@@ -22,7 +27,7 @@ impl Viewer {
         {
             return false;
         }
-        if !consume(ctx, egui::Modifiers::NONE, egui::Key::Tab) {
+        if !self.action(ctx, Action::Overview) {
             return false;
         }
         ctx.memory_mut(|m| {
@@ -49,15 +54,45 @@ impl Viewer {
         {
             return;
         }
-        if consume(ctx, egui::Modifiers::NONE, egui::Key::V) {
+        if self.action(ctx, Action::CleanView) {
+            self.chrome.clean_view = !self.chrome.clean_view;
+            if self.chrome.clean_view {
+                self.features.info_open = false;
+                self.associated.open = false;
+            }
+            self.features.cancel_gesture();
+            ctx.request_repaint();
+            return;
+        }
+        if self.chrome.clean_view && consume(ctx, egui::Modifiers::NONE, egui::Key::Escape) {
+            self.chrome.clean_view = false;
+            ctx.request_repaint();
+            return;
+        }
+        if self.action(ctx, Action::Sidebar) {
             self.toggle_sidebar();
             return;
         }
-        if consume(ctx, egui::Modifiers::NONE, egui::Key::G) {
+        if self.action(ctx, Action::Minimap) {
             self.preferences.show_minimap = !self.preferences.show_minimap;
             return;
         }
+        if consume(ctx, egui::Modifiers::SHIFT, egui::Key::Slash)
+            || consume(ctx, egui::Modifiers::SHIFT, egui::Key::Questionmark)
+            || consume(ctx, egui::Modifiers::NONE, egui::Key::Questionmark)
+        {
+            self.features.workflow.help = !self.features.workflow.help;
+            return;
+        }
         if self.slide.is_none() {
+            return;
+        }
+        if consume(ctx, egui::Modifiers::NONE, egui::Key::N) {
+            self.step_field(true);
+            return;
+        }
+        if consume(ctx, egui::Modifiers::NONE, egui::Key::P) {
+            self.step_field(false);
             return;
         }
         let undo = consume(ctx, egui::Modifiers::CTRL, egui::Key::Z);
@@ -93,7 +128,7 @@ impl Viewer {
         if self.handle_overview_shortcut(ctx) {
             return;
         }
-        if consume(ctx, egui::Modifiers::NONE, egui::Key::B) {
+        if self.action(ctx, Action::Scale) {
             self.features.show_scale = !self.features.show_scale;
             return;
         }
@@ -120,15 +155,15 @@ impl Viewer {
             return;
         }
         for (key, tool) in [
-            (egui::Key::Q, Tool::Pan),
-            (egui::Key::W, Tool::Line),
-            (egui::Key::E, Tool::Rectangle),
-            (egui::Key::A, Tool::Pointer),
-            (egui::Key::S, Tool::Circle),
-            (egui::Key::D, Tool::Freehand),
-            (egui::Key::C, Tool::Polygon),
+            (Action::Pan, Tool::Pan),
+            (Action::Line, Tool::Line),
+            (Action::Rectangle, Tool::Rectangle),
+            (Action::Pointer, Tool::Pointer),
+            (Action::Circle, Tool::Circle),
+            (Action::Freehand, Tool::Freehand),
+            (Action::Polygon, Tool::Polygon),
         ] {
-            if consume(ctx, egui::Modifiers::NONE, key) {
+            if self.action(ctx, key) {
                 self.features.cancel_gesture();
                 self.features.tool = tool;
                 if tool != Tool::Pan {
@@ -137,26 +172,24 @@ impl Viewer {
                 return;
             }
         }
-        for (key, requested) in [
-            (egui::Key::Num1, 2.0),
-            (egui::Key::Num2, 4.0),
-            (egui::Key::Num3, 10.0),
-            (egui::Key::Num4, 20.0),
-            (egui::Key::Num5, 40.0),
-        ] {
-            if consume(ctx, egui::Modifiers::NONE, key) {
+        for (key, requested) in crate::keybindings::MAG_ACTIONS
+            .into_iter()
+            .zip(self.preferences.magnifications)
+        {
+            if self.action(ctx, key) {
                 self.set_magnification(requested);
                 return;
             }
         }
+        let fit = self.action(ctx, Action::Fit);
+        let rotate = self.action(ctx, Action::Rotate);
+        let previous_z = self.action(ctx, Action::PreviousZ);
+        let next_z = self.action(ctx, Action::NextZ);
         ctx.input(|i| {
-            if !i.modifiers.is_none() {
-                return;
-            }
-            if i.key_pressed(egui::Key::F) {
+            if fit {
                 self.fit = true;
             }
-            if i.key_pressed(egui::Key::R) {
+            if rotate {
                 self.features.cancel_gesture();
                 self.features.rotation = (self.features.rotation + 1) % 4;
                 self.changed();
@@ -165,12 +198,12 @@ impl Viewer {
                 self.features.tool = Tool::Pan;
                 self.features.cancel_gesture();
             }
-            if i.key_pressed(egui::Key::PageUp) || i.key_pressed(egui::Key::Z) {
+            if previous_z || (i.modifiers.is_none() && i.key_pressed(egui::Key::PageUp)) {
                 self.features.cancel_gesture();
                 self.plane = self.plane.saturating_sub(1);
                 self.changed();
             }
-            if i.key_pressed(egui::Key::PageDown) || i.key_pressed(egui::Key::X) {
+            if next_z || (i.modifiers.is_none() && i.key_pressed(egui::Key::PageDown)) {
                 self.features.cancel_gesture();
                 self.plane = (self.plane + 1).min(self.slide.as_ref().unwrap().planes - 1);
                 self.changed();
@@ -183,7 +216,7 @@ impl Viewer {
                 (egui::Key::ArrowUp, egui::vec2(0.0, -step_size.y)),
                 (egui::Key::ArrowDown, egui::vec2(0.0, step_size.y)),
             ] {
-                if i.key_pressed(key) {
+                if i.modifiers.is_none() && i.key_pressed(key) {
                     delta += step;
                 }
             }
@@ -219,6 +252,29 @@ mod tests {
                 });
             },
         );
+    }
+
+    #[test]
+    fn remapped_tools_and_clean_view_restore_without_changing_navigation() {
+        let (mut viewer, _) = crate::tests::tile_viewer();
+        let ctx = egui::Context::default();
+        viewer.preferences.bindings.0[Action::Line as usize] =
+            crate::keybindings::Binding::plain(egui::Key::J);
+        frame(&mut viewer, &ctx, egui::Key::W, egui::Modifiers::NONE);
+        assert!(viewer.features.tool == Tool::Pan);
+        frame(&mut viewer, &ctx, egui::Key::J, egui::Modifiers::NONE);
+        assert!(viewer.features.tool == Tool::Line);
+        let navigation = (viewer.center, viewer.zoom, viewer.plane);
+        frame(&mut viewer, &ctx, egui::Key::H, egui::Modifiers::NONE);
+        assert!(viewer.chrome.clean_view);
+        viewer.preferences.clean_show_minimap = false;
+        assert!(viewer.navigator_rect(egui::Rect::EVERYTHING).is_none());
+        frame(&mut viewer, &ctx, egui::Key::Escape, egui::Modifiers::NONE);
+        assert!(!viewer.chrome.clean_view);
+        assert_eq!((viewer.center, viewer.zoom, viewer.plane), navigation);
+        viewer.preferences.bindings = Default::default();
+        frame(&mut viewer, &ctx, egui::Key::W, egui::Modifiers::NONE);
+        assert!(viewer.features.tool == Tool::Line);
     }
 
     #[test]
@@ -371,6 +427,20 @@ mod tests {
     }
 
     #[test]
+    fn custom_magnification_slot_changes_only_its_target() {
+        let (mut viewer, _) = crate::tests::tile_viewer();
+        let ctx = egui::Context::default();
+        let mut slide = crate::ndpa::test_slide();
+        slide.ndpa.as_mut().unwrap().lens = 40.0;
+        viewer.slide = Some(slide);
+        viewer.preferences.magnifications[0] = 1.25;
+        frame(&mut viewer, &ctx, egui::Key::Num1, egui::Modifiers::NONE);
+        assert_eq!(viewer.zoom, 0.03125);
+        frame(&mut viewer, &ctx, egui::Key::Num2, egui::Modifiers::NONE);
+        assert_eq!(viewer.zoom, 0.1);
+    }
+
+    #[test]
     fn focused_text_and_popups_keep_keys_and_disable_temporary_pan() {
         let (mut viewer, _) = crate::tests::tile_viewer();
         let ctx = egui::Context::default();
@@ -390,7 +460,14 @@ mod tests {
             egui::Key::Space,
             egui::Key::V,
             egui::Key::G,
+            egui::Key::H,
+            egui::Key::N,
+            egui::Key::P,
+            egui::Key::T,
+            egui::Key::L,
+            egui::Key::Questionmark,
         ] {
+            let old_clean = viewer.chrome.clean_view;
             let old_preferences = viewer.preferences;
             let old_zoom = viewer.zoom;
             let old_plane = viewer.plane;
@@ -410,6 +487,7 @@ mod tests {
                 },
                 |ctx| {
                     viewer.handle_shortcuts(ctx);
+                    viewer.workflow_input(ctx);
                     assert!(!viewer.temporary_pan(ctx));
                     egui::CentralPanel::default().show(ctx, |ui| {
                         ui.add(egui::TextEdit::singleline(&mut text).id(id))
@@ -418,6 +496,7 @@ mod tests {
                 },
             );
             assert!(viewer.features.tool == Tool::Pan);
+            assert_eq!(viewer.chrome.clean_view, old_clean);
             assert_eq!(viewer.preferences, old_preferences);
             assert_eq!(viewer.zoom, old_zoom);
             assert_eq!(viewer.plane, old_plane);

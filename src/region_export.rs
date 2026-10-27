@@ -34,6 +34,7 @@ pub(crate) struct Job {
     pub annotations: Vec<crate::annotations::Annotation>,
     pub scale: bool,
     pub labels: bool,
+    pub annotation_style: [f32; 2],
     pub path: PathBuf,
 }
 
@@ -111,8 +112,11 @@ pub(crate) fn export(job: Job, cancel: &AtomicBool, progress: &AtomicU32) -> Res
             &job.slide,
             [x, y],
             &job.annotations,
-            job.scale,
-            job.labels,
+            crate::export_overlay::Style {
+                scale: job.scale,
+                labels: job.labels,
+                annotation: job.annotation_style,
+            },
             cancel,
         )?;
     }

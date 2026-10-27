@@ -223,6 +223,51 @@ impl Viewer {
         neighbors
     }
 
+    fn adjacent_z_tiles(&self, wanted: &[Region]) -> Vec<Region> {
+        if !self.preferences.prefetch_z {
+            return vec![];
+        }
+        let Some(slide) = &self.slide else {
+            return vec![];
+        };
+        let bytes = |r: &Region| r.w as usize * r.h as usize * 4;
+        let foreground: usize = wanted.iter().map(bytes).sum::<usize>()
+            + self.adjacent_tiles(wanted).iter().map(bytes).sum::<usize>();
+        let overview_bytes: usize = [
+            Some(self.plane),
+            self.plane.checked_add(1),
+            self.plane.checked_sub(1),
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|&z| z < slide.planes)
+        .filter_map(|z| self.overview(z))
+        .map(|r| bytes(&r))
+        .sum();
+        let mut budget = self
+            .cache_budget
+            .saturating_sub(foreground + overview_bytes)
+            .min(self.cache_budget / 4);
+        let mut result = Vec::new();
+        for tile in wanted {
+            for z in [self.plane.checked_add(1), self.plane.checked_sub(1)]
+                .into_iter()
+                .flatten()
+                .filter(|&z| z < slide.planes)
+            {
+                let cost = bytes(tile);
+                if cost > budget {
+                    continue;
+                }
+                budget -= cost;
+                let mut tile = tile.clone();
+                tile.plane = z;
+                result.push(tile);
+            }
+        }
+        result
+    }
+
     pub(super) fn next_tile(&self, wanted: &[Region]) -> Option<Region> {
         let missing =
             |r: &Region| !self.cached(r) && !self.failed.iter().any(|f| same_region(f, r));
@@ -240,6 +285,7 @@ impl Viewer {
                     .filter_map(|z| self.overview(z))
                     .find(missing)
             })
+            .or_else(|| self.adjacent_z_tiles(wanted).into_iter().find(missing))
     }
 
     pub(super) fn draw_tiles(&mut self, ui: &egui::Ui, rect: egui::Rect, wanted: &[Region]) {
@@ -299,6 +345,31 @@ impl Viewer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn z_prefetch_shares_budget_and_never_precedes_visible_detail() {
+        let (mut viewer, _) = crate::tests::tile_viewer();
+        viewer.slide.as_mut().unwrap().planes = 5;
+        viewer.plane = 2;
+        for mib in [48, 96, 256, 512] {
+            viewer.cache_budget = mib * 1048576;
+            let wanted = viewer.visible_tiles(viewer.viewport_size);
+            let neighbors = viewer.adjacent_z_tiles(&wanted);
+            assert!(neighbors.iter().all(|r| r.plane == 1 || r.plane == 3));
+            assert!(
+                neighbors
+                    .iter()
+                    .map(|r| r.w as usize * r.h as usize * 4)
+                    .sum::<usize>()
+                    <= viewer.cache_budget / 4
+            );
+            assert_eq!(viewer.next_tile(&wanted).unwrap().plane, 2);
+        }
+        viewer.preferences.prefetch_z = false;
+        assert!(viewer
+            .adjacent_z_tiles(&viewer.visible_tiles(viewer.viewport_size))
+            .is_empty());
+    }
+
     #[test]
     fn neighbor_prefetch_is_bounded_converges_and_preserves_foreground() {
         for mib in [48, 96, 256, 512] {

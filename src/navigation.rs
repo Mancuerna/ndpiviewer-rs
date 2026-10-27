@@ -9,6 +9,7 @@ pub(super) struct View {
     center: egui::Vec2,
     zoom: f32,
     plane: u32,
+    angle: f32,
     rotation: u8,
     mirrored: [bool; 2],
 }
@@ -89,6 +90,7 @@ impl Viewer {
             center: self.center,
             zoom: self.zoom,
             plane: self.plane,
+            angle: self.features.angle,
             rotation: self.features.rotation,
             mirrored: self.features.mirrored,
         }
@@ -105,6 +107,7 @@ impl Viewer {
             self.zoom = view.zoom;
             self.plane = view.plane;
             self.features.rotation = view.rotation;
+            self.features.angle = view.angle;
             self.features.mirrored = view.mirrored;
             self.fit = false;
             self.changed();
@@ -172,6 +175,7 @@ mod tests {
             center: egui::vec2(x, 10.0),
             zoom: 1.0,
             plane: 0,
+            angle: 0.0,
             rotation: 0,
             mirrored: [false; 2],
         }
@@ -188,6 +192,7 @@ mod tests {
         let destination = View {
             zoom: 2.0,
             plane: 4,
+            angle: 0.0,
             rotation: 3,
             mirrored: [true, false],
             ..view(100.0)

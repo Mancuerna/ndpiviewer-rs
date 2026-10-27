@@ -4,13 +4,18 @@ use eframe::egui;
 use image::RgbaImage;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+pub(crate) struct Style {
+    pub scale: bool,
+    pub labels: bool,
+    pub annotation: [f32; 2],
+}
+
 pub(crate) fn paint(
     image: &mut RgbaImage,
     slide: &Slide,
     origin: [u32; 2],
     annotations: &[Annotation],
-    scale: bool,
-    labels: bool,
+    style: Style,
     cancel: &AtomicBool,
 ) -> Result<(), String> {
     let ctx = egui::Context::default();
@@ -21,11 +26,14 @@ pub(crate) fn paint(
     let overlay = Overlay {
         center: egui::vec2(origin[0] as f32, origin[1] as f32) + rect.size() * 0.5,
         zoom: 1.0,
+        angle: 0.0,
         rotation: 0,
         mirrored: [false; 2],
         calibration: slide.calibration,
-        show_scale: scale,
-        show_labels: labels,
+        show_scale: style.scale,
+        show_labels: style.labels,
+        annotation_width: style.annotation[0],
+        annotation_text_size: style.annotation[1],
     };
     let output = ctx.run(
         egui::RawInput {

@@ -5,6 +5,7 @@ mod annotations;
 mod associated;
 mod auto_contrast;
 mod background;
+mod channel_analysis;
 mod diagnostics;
 mod export_overlay;
 mod library;
@@ -34,6 +35,7 @@ mod comparison;
 mod display;
 mod export_file;
 mod features;
+mod keybindings;
 mod magnification;
 mod navigation;
 mod ndpa;
@@ -43,6 +45,8 @@ mod polygon;
 mod recent;
 mod settings;
 mod slide_info;
+#[cfg(test)]
+mod soak;
 mod source;
 #[cfg(test)]
 mod synthetic;
@@ -318,18 +322,20 @@ impl Viewer {
                 egui::Sense::click_and_drag()
             },
         );
-        if rect.size() != self.viewport_size {
+        if rect.size() != self.viewport_size || self.pixel_ratio != ui.ctx().pixels_per_point() {
             self.viewport_size = rect.size();
             self.pixel_ratio = ui.ctx().pixels_per_point();
             if self.slide.is_some() {
                 self.changed();
             }
         }
+        self.workflow_input(&ctx);
         let temporary_pan = self.temporary_pan(&ctx);
         if temporary_pan {
             self.features.cancel_gesture();
         }
-        let picked = if !temporary_pan
+        let picked = if !self.features.workflow_counting()
+            && !temporary_pan
             && response.double_clicked()
             && self.features.tool == features::Tool::Pan
         {
@@ -362,7 +368,8 @@ impl Viewer {
                 }
             }
             if self.fit
-                || (response.double_clicked()
+                || (!self.features.workflow_counting()
+                    && response.double_clicked()
                     && picked.is_none()
                     && self.features.tool == features::Tool::Pan)
             {
@@ -382,23 +389,7 @@ impl Viewer {
                 self.changed();
             }
             if response.hovered() && !over_navigator {
-                let scroll = ctx.input(|i| {
-                    if i.modifiers.ctrl || magnification::focus_scroll(&i.events) != 0 {
-                        0.0
-                    } else {
-                        i.smooth_scroll_delta.y
-                    }
-                });
-                if scroll != 0.0 {
-                    let pointer = ctx
-                        .input(|i| i.pointer.hover_pos())
-                        .unwrap_or(rect.center());
-                    let offset = self.inverse_transform(pointer - rect.center());
-                    let anchor = self.center + offset / self.zoom;
-                    self.zoom = (self.zoom * (scroll * 0.003).exp()).clamp(0.0001, 8.0);
-                    self.center = anchor - offset / self.zoom;
-                    self.changed();
-                }
+                self.wheel_zoom(&ctx, rect);
             }
             self.prepare_benchmark();
             self.center = self.center.clamp(egui::Vec2::ZERO, dimensions);
@@ -409,6 +400,7 @@ impl Viewer {
                 self.canvas_tools(ui, rect, &response);
             }
             self.paint_export_region(ui, rect);
+            self.counting_canvas(ui, rect, &response);
             self.navigator_overlay(ui, rect);
             self.advance_benchmark(&ctx, &wanted);
         } else {

@@ -5,6 +5,8 @@ use std::time::Instant;
 
 #[derive(Default)]
 pub(super) struct State {
+    pub transient: bool,
+    pub analysis: crate::channel_analysis::State,
     pub persistence: channel_settings::Persistence,
     pub settings: Vec<Setting>,
     pub active: Vec<Setting>,
@@ -18,6 +20,7 @@ pub(super) struct State {
 
 impl Viewer {
     pub(super) fn channel_panel(&mut self, ui: &mut egui::Ui) {
+        self.channel_analysis_panel(ui);
         let Some(slide) = self.slide.as_ref() else {
             return;
         };
@@ -141,6 +144,9 @@ impl Viewer {
     }
 
     pub(super) fn save_channel_settings(&mut self) {
+        if self.channels.transient {
+            return;
+        }
         if let Some(slide) = &self.slide {
             self.channels
                 .persistence

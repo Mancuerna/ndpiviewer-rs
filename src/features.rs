@@ -1,4 +1,4 @@
-mod capture;
+pub(crate) mod capture;
 mod exact_shape;
 mod freehand;
 mod geometry_edit;
@@ -10,6 +10,7 @@ mod region_panel;
 pub(crate) mod render;
 mod report;
 mod shortcuts;
+mod workflow;
 use super::*;
 #[cfg(test)]
 use persistence::{annotation_path, validate};
@@ -25,6 +26,7 @@ enum CaptureTarget {
 }
 
 pub(super) struct Features {
+    workflow: workflow::State,
     exact_shape: exact_shape::Settings,
     edit_shape: bool,
     geometry_gesture: Option<geometry_edit::Gesture>,
@@ -33,6 +35,7 @@ pub(super) struct Features {
     pub(super) info_open: bool,
     tracking: tracking::Tracking,
     navigator: navigator::State,
+    pub angle: f32,
     pub rotation: u8,
     pub mirrored: [bool; 2],
     pub overview_return: Option<(egui::Vec2, f32)>,
@@ -61,6 +64,7 @@ pub(super) struct Features {
 impl Default for Features {
     fn default() -> Self {
         Self {
+            workflow: Default::default(),
             exact_shape: Default::default(),
             edit_shape: false,
             geometry_gesture: None,
@@ -69,6 +73,7 @@ impl Default for Features {
             info_open: false,
             tracking: tracking::Tracking::default(),
             navigator: navigator::State::default(),
+            angle: 0.0,
             rotation: 0,
             mirrored: [false; 2],
             overview_return: None,
@@ -107,6 +112,9 @@ impl Features {
     }
 
     fn undo_edit(&mut self) {
+        if self.workflow.locked {
+            return;
+        }
         if self.edits.can_undo() {
             self.selected = self.edits.undo(&mut self.annotations);
             self.deleted_annotation = None;
@@ -114,6 +122,9 @@ impl Features {
         }
     }
     fn redo_edit(&mut self) {
+        if self.workflow.locked {
+            return;
+        }
         if self.edits.can_redo() {
             self.selected = self.edits.redo(&mut self.annotations);
             self.deleted_annotation = None;
@@ -122,6 +133,9 @@ impl Features {
     }
 
     fn remove_annotation(&mut self, index: usize) {
+        if self.workflow.locked {
+            return;
+        }
         if index < self.annotations.len() {
             let removed = self.annotations.remove(index);
             self.edits.removed(index, &removed);
@@ -171,6 +185,9 @@ pub(super) fn rotate(v: egui::Vec2, turns: u8) -> egui::Vec2 {
 }
 
 impl Viewer {
+    pub(crate) fn canvas_rect(&self) -> Option<egui::Rect> {
+        self.features.canvas
+    }
     pub(crate) fn export_region_visible(&self) -> bool {
         self.features.inspector == inspector::Tab::Export && self.features.export.is_none()
     }
@@ -230,7 +247,8 @@ impl Viewer {
             egui::pos2(world.min.x / size.x, world.min.y / size.y),
             egui::pos2(world.max.x / size.x, world.max.y / size.y),
         );
-        let ready = self.benchmark.is_none()
+        let ready = self.features.angle == 0.0
+            && self.benchmark.is_none()
             && ctx.input(|i| i.focused)
             && self.shown_plane == Some(self.plane)
             && self.channels.dirty_at.is_none()
@@ -250,31 +268,41 @@ impl Viewer {
     }
 
     pub(super) fn inverse_transform(&self, v: egui::Vec2) -> egui::Vec2 {
-        orientation::inverse(v, self.features.rotation, self.features.mirrored)
+        orientation::inverse(
+            orientation::turn(v, -self.features.angle),
+            self.features.rotation,
+            self.features.mirrored,
+        )
     }
     pub(super) fn world_view_size(&self, size: egui::Vec2) -> egui::Vec2 {
-        if self.features.rotation % 2 == 1 {
-            egui::vec2(size.y, size.x)
-        } else {
-            size
-        }
+        self.inverse_transform(egui::vec2(size.x, 0.0)).abs()
+            + self.inverse_transform(egui::vec2(0.0, size.y)).abs()
     }
     pub(super) fn screen_point(&self, p: egui::Vec2, rect: egui::Rect) -> egui::Pos2 {
         rect.center()
-            + orientation::forward(
-                (p - self.center) * self.zoom,
-                self.features.rotation,
-                self.features.mirrored,
+            + orientation::turn(
+                orientation::forward(
+                    (p - self.center) * self.zoom,
+                    self.features.rotation,
+                    self.features.mirrored,
+                ),
+                self.features.angle,
             )
     }
     pub(crate) fn world_point(&self, p: egui::Pos2, rect: egui::Rect) -> egui::Vec2 {
         self.center + self.inverse_transform(p - rect.center()) / self.zoom
     }
     pub(super) fn tile_rect(&self, w: [f32; 4], rect: egui::Rect) -> egui::Rect {
-        egui::Rect::from_two_pos(
-            self.screen_point(egui::vec2(w[0], w[1]), rect),
-            self.screen_point(egui::vec2(w[0] + w[2], w[1] + w[3]), rect),
-        )
+        let mut bounds = egui::Rect::NOTHING;
+        for p in [
+            [w[0], w[1]],
+            [w[0] + w[2], w[1]],
+            [w[0], w[1] + w[3]],
+            [w[0] + w[2], w[1] + w[3]],
+        ] {
+            bounds.extend_with(self.screen_point(p.into(), rect));
+        }
+        bounds
     }
     pub(super) fn paint_tile(&self, ui: &egui::Ui, rect: egui::Rect, e: &CachedRegion) {
         let w = e.region.world;
@@ -306,6 +334,7 @@ impl Viewer {
 
     fn annotation_panel(&mut self, ui: &mut egui::Ui, slide: &Slide) {
         ui.heading("Annotations");
+        self.workflow_panel(ui, slide);
         ui.horizontal_wrapped(|ui| {
             ui.checkbox(&mut self.features.show_annotations, "Show shapes");
             ui.checkbox(&mut self.features.show_labels, "Show labels");
@@ -360,6 +389,27 @@ impl Viewer {
             egui::TextEdit::singleline(&mut self.features.annotation_filter)
                 .hint_text("Search annotations…"),
         );
+        ui.horizontal_wrapped(|ui| {
+            ui.checkbox(&mut self.features.workflow.current_plane, "Current Z only");
+            egui::ComboBox::from_id_salt("annotation-kind")
+                .selected_text(self.features.workflow.kind.clone())
+                .show_ui(ui, |ui| {
+                    for label in [
+                        "All types",
+                        "Line",
+                        "Rectangle",
+                        "Circle",
+                        "Pointer",
+                        "Polygon",
+                    ] {
+                        ui.selectable_value(
+                            &mut self.features.workflow.kind,
+                            label.to_owned(),
+                            label,
+                        );
+                    }
+                });
+        });
         let query = self.features.annotation_filter.trim().to_lowercase();
         let matching: Vec<usize> = self
             .features
@@ -367,16 +417,19 @@ impl Viewer {
             .iter()
             .enumerate()
             .filter(|(i, a)| {
-                query.is_empty()
-                    || format!(
-                        "Annotation {} Z {} {} {}",
-                        i + 1,
-                        a.plane + 1,
-                        a.appearance.title,
-                        a.note
-                    )
-                    .to_lowercase()
-                    .contains(&query)
+                (!self.features.workflow.current_plane || a.plane == self.plane)
+                    && (self.features.workflow.kind == "All types"
+                        || self.features.workflow.kind == workflow::tool_name(a.tool))
+                    && (query.is_empty()
+                        || format!(
+                            "Annotation {} Z {} {} {}",
+                            i + 1,
+                            a.plane + 1,
+                            a.appearance.title,
+                            a.note
+                        )
+                        .to_lowercase()
+                        .contains(&query))
             })
             .map(|(i, _)| i)
             .collect();
@@ -440,18 +493,24 @@ impl Viewer {
                 }
             });
         if let Some(index) = jump {
-            self.visit_annotation(index, false);
+            self.visit_annotation(index, true);
         }
         if let Some(index) = self
             .features
             .selected
             .filter(|&i| i < self.features.annotations.len())
         {
+            if ui.button("Duplicate at view center").clicked() {
+                self.duplicate_annotation(index, slide);
+            }
             if ui.button("Fit selected annotation").clicked() {
                 self.visit_annotation(index, true);
             }
             if ui
-                .checkbox(&mut self.features.edit_shape, "Edit shape")
+                .add_enabled(
+                    !self.features.workflow.locked,
+                    egui::Checkbox::new(&mut self.features.edit_shape, "Edit shape"),
+                )
                 .changed()
             {
                 self.features.cancel_gesture();
@@ -539,11 +598,20 @@ impl Viewer {
             self.request_capture(ui.ctx(), CaptureTarget::Clipboard);
         }
         ui.small("Exports include visible annotations and scale at window resolution. PNG is lossless; JPEG uses quality 95.");
-        ui.checkbox(&mut self.features.show_scale, "Show scale bar (B)");
+        ui.checkbox(
+            &mut self.features.show_scale,
+            format!(
+                "Show scale bar ({})",
+                self.preferences
+                    .bindings
+                    .get(crate::keybindings::Action::Scale)
+                    .label()
+            ),
+        );
         ui.collapsing("Keyboard & mouse",|ui|{
             ui.label("Q: pan · W: length · E: box · A: arrow · S: circle · D: freehand · C: polygon");
-            ui.label("Tab: overview / return · Alt+M / Alt+F: mirror / flip\nF11: full screen · Escape: leave full screen");
-            ui.label("F: fit · R: rotate · 1–5: 2× / 4× / 10× / 20× / 40×\nArrows: pan · Z / X or Page Up/Down: focus Z\nRight-drag: zoom to area\nEscape: pan tool · Hold Space: temporary pan");
+            ui.label("Alt+M / Alt+F: mirror / flip · F11: full screen");
+            ui.label("Arrows: pan · Page Up/Down: focus Z · Right-drag: zoom to area\nEscape: pan tool · Hold Space: temporary pan\nSee Settings > Keyboard shortcuts for your current bindings.");
         });
     }
 
@@ -597,9 +665,13 @@ impl Viewer {
         let Some(slide) = self.slide.clone() else {
             return;
         };
+        if self.features.workflow.hide_marks {
+            self.paint_scale_bar(ui, rect, &slide);
+            return;
+        }
         let secondary = egui::PointerButton::Secondary;
         let primary = egui::PointerButton::Primary;
-        let temporary_pan = self.temporary_pan(ui.ctx());
+        let temporary_pan = self.temporary_pan(ui.ctx()) || self.features.workflow.counting;
         if !temporary_pan {
             self.polygon_input(ui, rect, response);
             self.freehand_input(ui, rect, response);
@@ -652,14 +724,21 @@ impl Viewer {
                 ui,
                 rect,
                 &Annotation {
-                    appearance: Default::default(),
+                    appearance: crate::annotations::Appearance {
+                        color: self.preferences.annotation_color,
+                        ..Default::default()
+                    },
                     tool,
                     points: points.clone(),
                     plane: self.plane,
                     note: String::new(),
                     origin: None,
                 },
-                egui::Color32::LIGHT_BLUE,
+                egui::Color32::from_rgb(
+                    self.preferences.annotation_color[0],
+                    self.preferences.annotation_color[1],
+                    self.preferences.annotation_color[2],
+                ),
                 &mut label_rects,
             );
             if response.drag_stopped_by(secondary) || response.drag_stopped_by(primary) {
@@ -678,7 +757,10 @@ impl Viewer {
                     {
                         self.features.show_annotations = true;
                         self.features.add_annotation(Annotation {
-                            appearance: Default::default(),
+                            appearance: crate::annotations::Appearance {
+                                color: self.preferences.annotation_color,
+                                ..Default::default()
+                            },
                             tool,
                             points,
                             plane: self.plane,

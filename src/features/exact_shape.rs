@@ -230,7 +230,10 @@ impl Viewer {
         };
         let allowed = fits(&points, slide) && self.features.annotations.len() < 10000;
         let annotation = Annotation {
-            appearance: Default::default(),
+            appearance: crate::annotations::Appearance {
+                color: self.preferences.annotation_color,
+                ..Default::default()
+            },
             tool,
             points: points.to_vec(),
             plane: self.plane,
@@ -242,7 +245,11 @@ impl Viewer {
             rect,
             &annotation,
             if allowed {
-                egui::Color32::LIGHT_BLUE
+                egui::Color32::from_rgb(
+                    self.preferences.annotation_color[0],
+                    self.preferences.annotation_color[1],
+                    self.preferences.annotation_color[2],
+                )
             } else {
                 egui::Color32::LIGHT_RED
             },
