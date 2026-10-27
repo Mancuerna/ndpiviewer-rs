@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/Mancuerna/ndpiviewer-rs/compare/v0.7.0...v0.8.0) (2026-10-27)
+
+
+### Features
+
+* add microscopy review, fluorescence analysis and comparison tools ([#18](https://github.com/Mancuerna/ndpiviewer-rs/issues/18)) ([9c9306b](https://github.com/Mancuerna/ndpiviewer-rs/commit/9c9306b1524de0350a83ab7485be95d8c9dfca4d))
+
 ## [0.7.0](https://github.com/Mancuerna/ndpiviewer-rs/compare/v0.6.0...v0.7.0) (2026-10-27)
 
 
