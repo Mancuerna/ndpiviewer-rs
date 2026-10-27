@@ -5,7 +5,21 @@
 
 ### Features
 
-* add compact controls, label previews and adjacent tile prefetch ([#16](https://github.com/Mancuerna/ndpiviewer-rs/issues/16)) ([795aa8c](https://github.com/Mancuerna/ndpiviewer-rs/commit/795aa8c1c3b36928f9ed157896566f20928e6b1f))
+- Free more space for the slide with compact controls, a Settings window and an optional auto-hiding sidebar that does not resize the image.
+- Press V to show or hide the sidebar and G to show or hide the minimap without stopping visited-area tracking. Shortcuts respect text fields and modifiers.
+- Adjust interface size from 75% to 200%, with saved preferences and scrollable settings.
+- Choose glass-slide/label thumbnails in the library, with slide-image fallback when an embedded label is unavailable.
+- Configure arrow-key movement as 1–100% of the visible field (25% by default), following the current view orientation.
+
+### Performance
+
+- Prefetch nearby image tiles after visible detail finishes loading, within the configured cache budget.
+- Protect visible tiles during cache eviction and keep neighboring zoom levels reusable.
+
+### Fixes
+
+- Hide the overlay sidebar during viewport image exports.
+- Remember minimap visibility, explicit sidebar visibility, interface scale and library thumbnail preferences across restarts.
 
 ## [0.6.0](https://github.com/Mancuerna/ndpiviewer-rs/compare/v0.5.0...v0.6.0) (2026-10-26)
 
